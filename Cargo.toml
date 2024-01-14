@@ -1,0 +1,28 @@
+[package]
+name = "distrans"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[lib]
+name = "distrans"
+path = "src/lib.rs"
+
+[[bin]]
+name = "distrans"
+src = "src/bin/distrans.rs"
+
+[[bin]]
+name = "randgen"
+src = "src/bin/randgen.rs"
+
+[dependencies]
+capnp = "0.18"
+flume = "0.11"
+thiserror = "1.0"
+tokio = "1.33"
+tracing = { version = "0.1", features = ["log", "attributes"] }
+veilid-core = "0.2.5"
+
+[build-dependencies]
+capnpc = "0.18"
