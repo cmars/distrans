@@ -10,18 +10,20 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "distrans"
-src = "src/bin/distrans.rs"
 
 [[bin]]
 name = "randgen"
-src = "src/bin/randgen.rs"
 
 [dependencies]
 capnp = "0.18"
 flume = "0.11"
+futures = "0.3.30"
+tempdir = "0.3.7"
 thiserror = "1.0"
 tokio = "1.33"
+tokio-util = "0.7"
 tracing = { version = "0.1", features = ["log", "attributes"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 veilid-core = "0.2.5"
 
 [build-dependencies]

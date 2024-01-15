@@ -31,7 +31,7 @@
           buildInputs = (with pkgs; [
             cargo
             cargo-watch
-            (rust-bin.nightly."2023-06-17".default.override { extensions = [ "rust-src" ]; })
+            (rust-bin.stable.latest.default.override { extensions = [ "rust-src" ]; })
             rustfmt
             rust-analyzer
             clang
@@ -39,7 +39,6 @@
             llvmPackages.libclang
             gnumake
             cmake
-            sqlite
             capnproto
             protobuf
           ]);
