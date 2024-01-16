@@ -4,8 +4,9 @@ use distrans::{other_err, veilid_config, Error, Result};
 
 use flume::{unbounded, Receiver, Sender};
 use futures::future::join_all;
+use metrics::{counter, histogram};
 use tempdir::TempDir;
-use tokio::{select, signal, task::JoinHandle};
+use tokio::{select, signal, task::JoinHandle, time::Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::filter::EnvFilter;
@@ -15,18 +16,39 @@ use veilid_core::{
     TypedKey, VeilidUpdate,
 };
 
+// This utility seeks to answer some basic questions worth answering before
+// investing more heavily in this platform:
+//
+// - How much throughput can Veilid sustain over time?
+// - Is this throughput scalable?
+//
+// To do this, a stress utility performs two roles, as a placeholder for a distrans peer:
+//
+// - Maintain a private route and publish it at a DHT, handling requests by responding with 32k random byte responses.
+// - Send requests (32k random bytes) to one or more private routes found by DHT key as fast as possible.
+//
+// Requests may be app_call or app_message. Both have tradeoffs.
+//
+// Measure the throughput and errors, to answer questions:
+//
+// - Assuming no protocol overhead, what is the theoretical lower bound on
+//   receiving a Linux ISO's worth of bytes?
+// - Is this acceptable for some use cases?
+// - Which is more effective in terms of theoretical upper-bound throughput? app_call or app_message?
+//
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .with(
             EnvFilter::builder()
-                .with_default_directive("randgen=debug".parse().unwrap())
+                .with_default_directive("stress=debug".parse().unwrap())
                 .from_env_lossy(),
         )
         .init();
 
-    let app_dir = TempDir::new("randgen").expect("tempdir");
+    let app_dir = TempDir::new("stress").expect("tempdir");
     let mut app = App::new(app_dir.path()).await.expect("new app");
     app.wait_for_network().await.expect("network");
     app.announce().await.expect("announce");
@@ -215,11 +237,17 @@ impl App {
                         };
                         let msg = crypto.random_bytes(32768);
                         let msg_len = msg.len();
+                        
+                        let t0 = Instant::now();
                         let resp = caller
                             .routing_context
                             .app_call(Target::PrivateRoute(rid), msg)
                             .await?;
+                        let delta = t0.elapsed();
                         debug!(sent = msg_len, received = resp.len());
+                        counter!("bytes_sent").increment(msg_len as u64);
+                        counter!("bytes_received").increment(resp.len() as u64);
+                        histogram!("request_response_time").record(delta);
                         route_id = Some(rid);
                     }
                 }
@@ -239,8 +267,6 @@ impl App {
     fn spawn_callee(&self, token: CancellationToken) -> JoinHandle<Result<()>> {
         let mut callee = self.clone();
         tokio::spawn(async move {
-            let mut bytesReceived = 0usize;
-            let mut bytesSent = 0usize;
             let crypto = callee.routing_context.api().crypto()?.best();
             loop {
                 select! {
@@ -251,14 +277,20 @@ impl App {
                         };
                         match update {
                             VeilidUpdate::AppCall(app_call) => {
+                                let t0 = Instant::now();
                                 debug!(received = app_call.message().len());
-                                bytesReceived += app_call.message().len();
-                                let resp = crypto.random_bytes(32768);
+                                counter!("bytes_received").increment(app_call.message().len() as u64);
 
+                                let resp = crypto.random_bytes(32768);
                                 let rc = callee.routing_context.clone();
                                 tokio::spawn(async move {
+                                    let resp_len = resp.len();
                                     rc.api().app_call_reply(app_call.id(), resp).await?;
-                                    debug!(sent = app_call.message().len());
+                                    let delta = t0.elapsed();
+
+                                    debug!(sent = resp_len);
+                                    counter!("bytes_sent").increment(resp_len as u64);
+                                    histogram!("response_time").record(delta);
                                     Ok::<(), Error>(())
                                     // bytesSent ack on channel back to serve loop to update stats
                                 });
