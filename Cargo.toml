@@ -16,9 +16,11 @@ name = "stress"
 
 [dependencies]
 capnp = "0.18"
+clap = {version = "4.4", features = ["derive", "env"]}
 flume = "0.11"
 futures = "0.3"
 metrics = "0.22"
+metrics-exporter-prometheus = { version = "0.13.0", features = ["http-listener"] }
 tempdir = "0.3.7"
 thiserror = "1.0"
 tokio = "1.33"

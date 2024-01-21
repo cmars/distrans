@@ -1,19 +1,24 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc, time::Duration,
+};
 
 use distrans::{other_err, veilid_config, Error, Result};
 
+use clap::{command, Parser};
 use flume::{unbounded, Receiver, Sender};
 use futures::future::join_all;
 use metrics::{counter, histogram};
-use tempdir::TempDir;
-use tokio::{select, signal, task::JoinHandle, time::Instant};
+use metrics_exporter_prometheus::PrometheusBuilder;
+use tokio::{select, signal, task::JoinHandle, time::{Instant, timeout}};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::prelude::*;
 use veilid_core::{
-    DHTRecordDescriptor, DHTSchemaDFLT, FromStr, RouteId, RoutingContext, Sequencing, Target,
-    TypedKey, VeilidUpdate,
+    DHTRecordDescriptor, DHTSchemaDFLT, FromStr, KeyPair, RouteId, RoutingContext, Sequencing,
+    Target, TypedKey, VeilidUpdate,
 };
 
 // This utility seeks to answer some basic questions worth answering before
@@ -37,6 +42,20 @@ use veilid_core::{
 // - Which is more effective in terms of theoretical upper-bound throughput? app_call or app_message?
 //
 
+#[derive(Parser, Debug)]
+#[command(name = "stress")]
+#[command(bin_name = "stress")]
+struct Cli {
+    #[arg(long, env)]
+    pub state_dir: String,
+
+    #[arg(long, env)]
+    pub addr: SocketAddr,
+
+    #[arg(long, env)]
+    pub peers: Vec<String>,
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::registry()
@@ -48,16 +67,22 @@ async fn main() {
         )
         .init();
 
-    let app_dir = TempDir::new("stress").expect("tempdir");
-    let mut app = App::new(app_dir.path()).await.expect("new app");
+    let cli = Cli::parse();
+
+    let _ = PrometheusBuilder::new()
+        .with_http_listener(cli.addr)
+        .install()
+        .expect("install prometheus exporter");
+
+    let mut app = App::new(PathBuf::from(cli.state_dir).as_path())
+        .await
+        .expect("new app");
     app.wait_for_network().await.expect("network");
     app.announce().await.expect("announce");
     let dht_key = (&app.dht_record.as_ref()).unwrap().key().to_owned();
     println!("{}", dht_key);
 
-    let remotes = std::env::args().skip(1).collect();
-
-    app.serve(remotes).await.expect("serve");
+    app.serve(cli.peers.clone()).await.expect("serve");
 
     app.routing_context
         .delete_dht_record(dht_key)
@@ -147,14 +172,7 @@ impl App {
     pub async fn announce(&mut self) -> Result<()> {
         let dht_record = match self.dht_record.take() {
             Some(dht_record) => dht_record,
-            None => {
-                self.routing_context
-                    .create_dht_record(
-                        veilid_core::DHTSchema::DFLT(DHTSchemaDFLT { o_cnt: 1 }),
-                        None,
-                    )
-                    .await?
-            }
+            None => self.open_or_create_dht_record().await?,
         };
         let dht_key = dht_record.key().to_owned();
         self.dht_record = Some(dht_record);
@@ -165,6 +183,36 @@ impl App {
             .set_dht_value(dht_key, 0, route_data)
             .await?;
         Ok(())
+    }
+
+    async fn open_or_create_dht_record(&mut self) -> Result<DHTRecordDescriptor> {
+        let ts = self.routing_context.api().table_store()?;
+        let db = ts.open("distrans_peer", 2).await?;
+        let maybe_dht_key = db.load_json(0, &[]).await?;
+        let maybe_dht_owner_keypair = db.load_json(1, &[]).await?;
+        if let (Some(dht_key), Some(dht_owner_keypair)) = (maybe_dht_key, maybe_dht_owner_keypair) {
+            return Ok(self
+                .routing_context
+                .open_dht_record(dht_key, dht_owner_keypair)
+                .await?);
+        }
+        let dht_rec = self
+            .routing_context
+            .create_dht_record(
+                veilid_core::DHTSchema::DFLT(DHTSchemaDFLT { o_cnt: 1 }),
+                None,
+            )
+            .await?;
+        let dht_owner = KeyPair::new(
+            dht_rec.owner().to_owned(),
+            dht_rec
+                .owner_secret()
+                .ok_or(other_err("expected dht owner secret"))?
+                .to_owned(),
+        );
+        db.store_json(0, &[], dht_rec.key()).await?;
+        db.store_json(1, &[], &dht_owner).await?;
+        Ok(dht_rec)
     }
 
     pub async fn serve(&self, remotes: Vec<String>) -> Result<()> {
@@ -237,17 +285,19 @@ impl App {
                         };
                         let msg = crypto.random_bytes(32768);
                         let msg_len = msg.len();
-                        
+
                         let t0 = Instant::now();
-                        let resp = caller
-                            .routing_context
-                            .app_call(Target::PrivateRoute(rid), msg)
-                            .await?;
+                        let resp = timeout(
+                            Duration::from_secs(5),
+                            caller
+                                .routing_context
+                                .app_call(Target::PrivateRoute(rid), msg),
+                        ).await.map_err(other_err)??;
                         let delta = t0.elapsed();
                         debug!(sent = msg_len, received = resp.len());
                         counter!("bytes_sent").increment(msg_len as u64);
                         counter!("bytes_received").increment(resp.len() as u64);
-                        histogram!("request_response_time").record(delta);
+                        histogram!("call_time").record(delta);
                         route_id = Some(rid);
                     }
                 }
@@ -257,8 +307,11 @@ impl App {
                 }
                 if token.is_cancelled() {
                     warn!("cancelled");
-                    caller.routing_context.close_dht_record(remote_dht_key).await?;
-                    return Ok(())
+                    caller
+                        .routing_context
+                        .close_dht_record(remote_dht_key)
+                        .await?;
+                    return Ok(());
                 }
             }
         })
@@ -278,7 +331,7 @@ impl App {
                         match update {
                             VeilidUpdate::AppCall(app_call) => {
                                 let t0 = Instant::now();
-                                debug!(received = app_call.message().len());
+                                debug!(received = app_call.message().len(), from = format!("{:?}", app_call.sender()));
                                 counter!("bytes_received").increment(app_call.message().len() as u64);
 
                                 let resp = crypto.random_bytes(32768);
@@ -290,9 +343,8 @@ impl App {
 
                                     debug!(sent = resp_len);
                                     counter!("bytes_sent").increment(resp_len as u64);
-                                    histogram!("response_time").record(delta);
+                                    histogram!("reply_time").record(delta);
                                     Ok::<(), Error>(())
-                                    // bytesSent ack on channel back to serve loop to update stats
                                 });
                             }
                             VeilidUpdate::RouteChange(route_change) => {

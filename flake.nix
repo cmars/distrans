@@ -41,6 +41,8 @@
             cmake
             capnproto
             protobuf
+            pkg-config
+            openssl
           ]);
 
           LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib";
