@@ -1,20 +1,59 @@
 @0xc46f97c2b79df618;
 
-# # Distrans protocol definitions
-#
-# Distrans protocol design needs to bridge two abstractions:
-#
-# 1. How to effectively distribute content among blocks which can be concurrently send and received
-# 2. How to map the content in those blocks onto the local filesystem
-#
-# (1) is constrained by Veilid's DHT and app_call limits (32k max length for a message or DHT value).
-# (2) is ideal for file-sharing because we don't want to duplicate storage
-#     locally: serve the files which are assembled.
-#
+# Protocols within protocols within protocols
 
-struct Layout {
-  name @0 :Text;
-  files @1 :List(FileSpec);
+# Veilid DHT has some pretty severe limitations:
+# - Max subkey value length 32KB
+# - Max total DHT value length (sum of all subkey lengths) 1MB
+#
+# Some of the structures that need to be represented in order to
+# index a large file could easily exceed these:
+# - List of blocks and their content hashes
+# - List of files and how they map onto block number and offset 
+# - List of peers and their private routes
+
+# The ground floor
+#
+# A Metadata Node serves as an envelope that can span DHT subkeys and keys.
+# It's a simple linked list that points to the next subkey to append to the cumulative value.
+
+struct MDNode {
+  value @0 :Data;
+
+  union {
+    next @1 :MDNodeRef;
+    nil @2 :Void;
+  }
+}
+
+using Subkey = UInt32;
+using TypedKey = Data;
+
+struct MDNodeRef {
+  # An MDNodeRef can either be local to the same DHT record, or remote (another DHT key).
+ 
+  union {
+    local @0 :Subkey;
+    remote @1 :RemoteMDNodeRef;
+  }
+}
+
+struct RemoteMDNodeRef {
+  # A RemoteNodeRef allows content to spill out into another DHT record entirely.
+  # This may be necessary in order to exceed the 1MB total size limit per DHT key.
+
+  key @0 :TypedKey;
+  subkey @1 :Subkey;
+}
+
+# Blocks are 1MB in size
+
+# Files are overlaid on top of 1MB-sized blocks
+
+struct FileIndex {
+  block @0 :UInt32;   # 4 Exabytes is probably enough (2**32 blocks * 2**20 byte-sized blocks)
+  offset @1 :UInt32;  # Offset within the block
+  path @2 :Text;      # Relative path of the file
 }
 
 struct FileSpec {
