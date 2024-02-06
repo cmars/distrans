@@ -1,6 +1,6 @@
 [workspace]
-edition = "2021"
 resolver = "2"
 members = [
   "distrans-peer",
+  "distrans-fileindex",
 ]
