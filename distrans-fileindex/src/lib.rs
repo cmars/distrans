@@ -20,7 +20,7 @@ pub struct Index {
 
 impl Index {
     /// from_file is used to index a complete local file on disk.
-    pub fn from_file(file: PathBuf) -> Result<Index> {
+    pub async fn from_file(file: PathBuf) -> Result<Index> {
         match file.try_exists() {
             Ok(true) => {}
             Ok(false) => {
@@ -33,15 +33,30 @@ impl Index {
 
         // root is directory containing file
         let resolved_file = file.canonicalize()?;
-        let root_dir = resolved_file
+        let root_dir = &resolved_file
             .parent()
             .ok_or(other_err("cannot resolve parent directory"))?;
 
         // payload is built from the given file
+        let payload = PayloadSpec::from_file(&resolved_file).await?;
+        let length = payload.length;
 
         // files is the file given
-
-        todo!()
+        Ok(Index {
+            root: root_dir.into(),
+            payload,
+            files: vec![FileSpec {
+                path: resolved_file
+                    .strip_prefix(root_dir)
+                    .map_err(other_err)?
+                    .to_owned(),
+                contents: PayloadSlice {
+                    starting_piece: 0,
+                    piece_offset: 0,
+                    length,
+                },
+            }],
+        })
     }
 
     /// from_files is used to index a local subdirectory tree of files on disk.
@@ -148,10 +163,6 @@ pub struct PayloadBlock {
 
     /// Contents of the block.
     data: Vec<u8>,
-}
-
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
 }
 
 #[cfg(test)]
