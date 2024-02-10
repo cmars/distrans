@@ -20,6 +20,18 @@ pub struct Index {
 }
 
 impl Index {
+    pub fn root(&self) -> &Path {
+        return self.root.as_ref();
+    }
+
+    pub fn payload(&self) -> &PayloadSpec {
+        return &self.payload;
+    }
+
+    pub fn files(&self) -> &Vec<FileSpec> {
+        return &self.files;
+    }
+
     /// from_file is used to index a complete local file on disk.
     pub async fn from_file(file: PathBuf) -> Result<Index> {
         match file.try_exists() {
@@ -62,8 +74,8 @@ impl Index {
 
     /// from_files is used to index a local subdirectory tree of files on disk.
     /// Empty folders are ignored; only files are indexed.
-    pub fn from_files(root: PathBuf) -> Index {
-        todo!()
+    pub fn from_files(_root: PathBuf) -> Index {
+        unimplemented!()
     }
 
     /// from_specs is used to build an index of a file from a remote
@@ -87,7 +99,17 @@ pub struct FileSpec {
     contents: PayloadSlice,
 }
 
-#[derive(Debug)]
+impl FileSpec {
+    pub fn path(&self) -> &Path {
+        return self.path.as_ref();
+    }
+
+    pub fn contents(&self) -> PayloadSlice {
+        self.contents
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Copy)]
 pub struct PayloadSlice {
     /// Starting piece where the slice begins.
     starting_piece: usize,
@@ -97,6 +119,30 @@ pub struct PayloadSlice {
 
     /// Length of the slice. This can span multiple slices.
     length: usize,
+}
+
+impl PayloadSlice {
+    pub fn starting_piece(&self) -> usize {
+        return self.starting_piece;
+    }
+
+    pub fn piece_offset(&self) -> usize {
+        return self.piece_offset;
+    }
+
+    pub fn length(&self) -> usize {
+        return self.length;
+    }
+}
+
+impl Clone for PayloadSlice {
+    fn clone(&self) -> Self {
+        PayloadSlice {
+            starting_piece: self.starting_piece,
+            piece_offset: self.piece_offset,
+            length: self.length,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -120,6 +166,18 @@ impl PayloadSpec {
         }
     }
 
+    pub fn digest(&self) -> &[u8] {
+        return &self.digest[..]
+    }
+
+    pub fn length(&self) -> usize {
+        return self.length
+    }
+
+    pub fn pieces(&self) -> &Vec<PayloadPiece> {
+        return &self.pieces
+    }
+
     pub async fn from_file(file: impl AsRef<Path>) -> Result<PayloadSpec> {
         let mut fh = File::open(file).await?;
         let mut buf = [0u8; BLOCK_SIZE_BYTES];
@@ -131,7 +189,7 @@ impl PayloadSpec {
                 length: 0,
             };
             let mut piece_digest = Sha256::new();
-            for i in 0..PIECE_SIZE_BLOCKS {
+            for _ in 0..PIECE_SIZE_BLOCKS {
                 let rd = fh.read(&mut buf[..]).await?;
                 if rd == 0 {
                     break;
@@ -161,21 +219,21 @@ pub struct PayloadPiece {
     length: usize,
 }
 
-#[derive(Debug)]
-pub struct PayloadBlock {
-    /// Length of the block.
-    /// May be < BLOCK_SIZE_BYTES if the last block.
-    length: usize,
+impl PayloadPiece {
+    pub fn digest(&self) -> &[u8] {
+        return &self.digest[..]
+    }
 
-    /// Contents of the block.
-    data: Vec<u8>,
+    pub fn length(&self) -> usize {
+        return self.length
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use hex_literal::hex;
-    use std::io::{Read, Write};
+    use std::io::Write;
     use tempfile::NamedTempFile;
 
     fn temp_file(pattern: &[u8], count: usize) -> Result<NamedTempFile> {
@@ -194,24 +252,38 @@ mod tests {
             .await
             .expect("Index::from_file");
 
+        assert_eq!(index.root().to_owned(), tempf.path().parent().unwrap().to_owned());
+
         // Index files
-        assert_eq!(index.files.len(), 1);
+        assert_eq!(index.files().len(), 1);
+        assert_eq!(
+            index.files()[0].path().to_owned(),
+            tempf.path().file_name().unwrap().to_owned()
+        );
+        assert_eq!(
+            index.files()[0].contents(),
+            PayloadSlice {
+                piece_offset: 0,
+                starting_piece: 0,
+                length: 1049600,
+            }
+        );
 
         // Index payload
         assert_eq!(
-            index.payload.digest,
+            index.payload().digest(),
             hex!("529df3a7e7acab0e3b53e7cd930faa22e62cd07a948005b1c3f7f481f32a7297")
         );
-        assert_eq!(index.payload.length, 1049600);
-        assert_eq!(index.payload.pieces.len(), 2);
-        assert_eq!(index.payload.pieces[0].length, 1048576);
+        assert_eq!(index.payload().length(), 1049600);
+        assert_eq!(index.payload().pieces().len(), 2);
+        assert_eq!(index.payload().pieces()[0].length(), 1048576);
         assert_eq!(
-            index.payload.pieces[0].digest,
+            index.payload().pieces()[0].digest(),
             hex!("153faf1f2a007097d33120bbee6944a41cb8be7643c1222f6bc6bc69ec31688f")
         );
-        assert_eq!(index.payload.pieces[1].length, 1024);
+        assert_eq!(index.payload().pieces()[1].length(), 1024);
         assert_eq!(
-            index.payload.pieces[1].digest,
+            index.payload().pieces()[1].digest(),
             hex!("ca33403cfcb21bae20f21507475a3525c7f4bd36bb2a7074891e3307c5fd47d5")
         );
 
