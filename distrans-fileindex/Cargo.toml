@@ -8,4 +8,8 @@ edition = "2021"
 [dependencies]
 rust-crypto = "0.2"
 thiserror = "1.0"
-tokio = { version = "1.33", features = ["fs", "io-util"] }
+tokio = { version = "1.33", features = ["fs", "io-util", "macros", "rt"] }
+
+[dev-dependencies]
+hex-literal = "0.4"
+tempfile = "3.10"

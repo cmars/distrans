@@ -12,6 +12,7 @@ use crate::error::{other_err, Error, Result};
 const BLOCK_SIZE_BYTES: usize = 32768;
 const PIECE_SIZE_BLOCKS: usize = 32; // 32 * 32KB blocks = 1MB
 
+#[derive(Debug)]
 pub struct Index {
     root: PathBuf,
     payload: PayloadSpec,
@@ -77,6 +78,7 @@ impl Index {
     }
 }
 
+#[derive(Debug)]
 pub struct FileSpec {
     /// File name.
     path: PathBuf,
@@ -85,6 +87,7 @@ pub struct FileSpec {
     contents: PayloadSlice,
 }
 
+#[derive(Debug)]
 pub struct PayloadSlice {
     /// Starting piece where the slice begins.
     starting_piece: usize,
@@ -96,6 +99,7 @@ pub struct PayloadSlice {
     length: usize,
 }
 
+#[derive(Debug)]
 pub struct PayloadSpec {
     /// SHA256 digest of the complete payload.
     digest: [u8; 32],
@@ -147,6 +151,7 @@ impl PayloadSpec {
     }
 }
 
+#[derive(Debug)]
 pub struct PayloadPiece {
     /// SHA256 digest of the complete piece.
     digest: [u8; 32],
@@ -156,6 +161,7 @@ pub struct PayloadPiece {
     length: usize,
 }
 
+#[derive(Debug)]
 pub struct PayloadBlock {
     /// Length of the block.
     /// May be < BLOCK_SIZE_BYTES if the last block.
@@ -168,10 +174,47 @@ pub struct PayloadBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hex_literal::hex;
+    use std::io::{Read, Write};
+    use tempfile::NamedTempFile;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn temp_file(pattern: &[u8], count: usize) -> Result<NamedTempFile> {
+        let mut tempf = NamedTempFile::new().expect("temp file");
+        for _ in 0..count {
+            tempf.write(pattern)?;
+        }
+        Ok(tempf)
+    }
+
+    #[tokio::test]
+    async fn single_file_index() {
+        let tempf = temp_file(b".", 1049600).expect("write temp file");
+
+        let index = Index::from_file(tempf.path().into())
+            .await
+            .expect("Index::from_file");
+
+        // Index files
+        assert_eq!(index.files.len(), 1);
+
+        // Index payload
+        assert_eq!(
+            index.payload.digest,
+            hex!("529df3a7e7acab0e3b53e7cd930faa22e62cd07a948005b1c3f7f481f32a7297")
+        );
+        assert_eq!(index.payload.length, 1049600);
+        assert_eq!(index.payload.pieces.len(), 2);
+        assert_eq!(index.payload.pieces[0].length, 1048576);
+        assert_eq!(
+            index.payload.pieces[0].digest,
+            hex!("153faf1f2a007097d33120bbee6944a41cb8be7643c1222f6bc6bc69ec31688f")
+        );
+        assert_eq!(index.payload.pieces[1].length, 1024);
+        assert_eq!(
+            index.payload.pieces[1].digest,
+            hex!("ca33403cfcb21bae20f21507475a3525c7f4bd36bb2a7074891e3307c5fd47d5")
+        );
+
+        println!("{:?}", index);
     }
 }
