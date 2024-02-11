@@ -17,6 +17,7 @@ name = "stress"
 [dependencies]
 capnp = "0.18"
 clap = {version = "4.4", features = ["derive", "env"]}
+distrans-fileindex = {path = "../distrans-fileindex"}
 flume = "0.11"
 futures = "0.3"
 metrics = "0.22"
@@ -31,3 +32,6 @@ veilid-core = "0.2.5"
 
 [build-dependencies]
 capnpc = "0.18"
+
+[dev-dependencies]
+tempfile = "3.10"

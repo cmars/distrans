@@ -12,7 +12,7 @@ use crate::error::{other_err, Error, Result};
 const BLOCK_SIZE_BYTES: usize = 32768;
 const PIECE_SIZE_BLOCKS: usize = 32; // 32 * 32KB blocks = 1MB
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Index {
     root: PathBuf,
     payload: PayloadSpec,
@@ -90,7 +90,7 @@ impl Index {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FileSpec {
     /// File name.
     path: PathBuf,
@@ -145,7 +145,7 @@ impl Clone for PayloadSlice {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PayloadSpec {
     /// SHA256 digest of the complete payload.
     digest: [u8; 32],
@@ -209,7 +209,7 @@ impl PayloadSpec {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PayloadPiece {
     /// SHA256 digest of the complete piece.
     digest: [u8; 32],
