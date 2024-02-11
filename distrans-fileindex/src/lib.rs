@@ -12,7 +12,7 @@ use crate::error::{other_err, Error, Result};
 const BLOCK_SIZE_BYTES: usize = 32768;
 const PIECE_SIZE_BLOCKS: usize = 32; // 32 * 32KB blocks = 1MB
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Index {
     root: PathBuf,
     payload: PayloadSpec,
@@ -20,6 +20,14 @@ pub struct Index {
 }
 
 impl Index {
+    pub fn new(root: PathBuf, payload: PayloadSpec, files: Vec<FileSpec>) -> Index {
+        Index {
+            root,
+            payload,
+            files,
+        }
+    }
+
     pub fn root(&self) -> &Path {
         return self.root.as_ref();
     }
@@ -90,7 +98,7 @@ impl Index {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FileSpec {
     /// File name.
     path: PathBuf,
@@ -100,6 +108,10 @@ pub struct FileSpec {
 }
 
 impl FileSpec {
+    pub fn new(path: PathBuf, contents: PayloadSlice) -> FileSpec {
+        FileSpec { path, contents }
+    }
+
     pub fn path(&self) -> &Path {
         return self.path.as_ref();
     }
@@ -122,6 +134,14 @@ pub struct PayloadSlice {
 }
 
 impl PayloadSlice {
+    pub fn new(starting_piece: usize, piece_offset: usize, length: usize) -> PayloadSlice {
+        PayloadSlice {
+            starting_piece,
+            piece_offset,
+            length,
+        }
+    }
+
     pub fn starting_piece(&self) -> usize {
         return self.starting_piece;
     }
@@ -145,7 +165,7 @@ impl Clone for PayloadSlice {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct PayloadSpec {
     /// SHA256 digest of the complete payload.
     digest: [u8; 32],
@@ -158,30 +178,30 @@ pub struct PayloadSpec {
 }
 
 impl PayloadSpec {
-    fn new() -> PayloadSpec {
+    pub fn new(digest: [u8; 32], length: usize, pieces: Vec<PayloadPiece>) -> PayloadSpec {
         PayloadSpec {
-            digest: [0u8; 32],
-            length: 0,
-            pieces: vec![],
+            digest,
+            length,
+            pieces,
         }
     }
 
     pub fn digest(&self) -> &[u8] {
-        return &self.digest[..]
+        return &self.digest[..];
     }
 
     pub fn length(&self) -> usize {
-        return self.length
+        return self.length;
     }
 
     pub fn pieces(&self) -> &Vec<PayloadPiece> {
-        return &self.pieces
+        return &self.pieces;
     }
 
     pub async fn from_file(file: impl AsRef<Path>) -> Result<PayloadSpec> {
         let mut fh = File::open(file).await?;
         let mut buf = [0u8; BLOCK_SIZE_BYTES];
-        let mut payload = PayloadSpec::new();
+        let mut payload = PayloadSpec::default();
         let mut payload_digest = Sha256::new();
         loop {
             let mut piece = PayloadPiece {
@@ -209,7 +229,17 @@ impl PayloadSpec {
     }
 }
 
-#[derive(Debug, PartialEq)]
+impl Default for PayloadSpec {
+    fn default() -> PayloadSpec {
+        PayloadSpec {
+            digest: [0u8; 32],
+            length: 0,
+            pieces: vec![],
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct PayloadPiece {
     /// SHA256 digest of the complete piece.
     digest: [u8; 32],
@@ -220,12 +250,16 @@ pub struct PayloadPiece {
 }
 
 impl PayloadPiece {
+    pub fn new(digest: [u8; 32], length: usize) -> PayloadPiece {
+        PayloadPiece { digest, length }
+    }
+
     pub fn digest(&self) -> &[u8] {
-        return &self.digest[..]
+        return &self.digest[..];
     }
 
     pub fn length(&self) -> usize {
-        return self.length
+        return self.length;
     }
 }
 
@@ -236,23 +270,25 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    fn temp_file(pattern: &[u8], count: usize) -> Result<NamedTempFile> {
+    fn temp_file(pattern: u8, count: usize) -> NamedTempFile {
         let mut tempf = NamedTempFile::new().expect("temp file");
-        for _ in 0..count {
-            tempf.write(pattern)?;
-        }
-        Ok(tempf)
+        let contents = vec![pattern; count];
+        tempf.write(contents.as_slice()).expect("write temp file");
+        tempf
     }
 
     #[tokio::test]
     async fn single_file_index() {
-        let tempf = temp_file(b".", 1049600).expect("write temp file");
+        let tempf = temp_file(b'.', 1049600);
 
         let index = Index::from_file(tempf.path().into())
             .await
             .expect("Index::from_file");
 
-        assert_eq!(index.root().to_owned(), tempf.path().parent().unwrap().to_owned());
+        assert_eq!(
+            index.root().to_owned(),
+            tempf.path().parent().unwrap().to_owned()
+        );
 
         // Index files
         assert_eq!(index.files().len(), 1);

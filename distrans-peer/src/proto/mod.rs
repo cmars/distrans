@@ -1,10 +1,13 @@
 mod distrans_capnp;
 
-use std::{array::TryFromSliceError, path::PathBuf};
+use std::{array::TryFromSliceError, path::PathBuf, str::Utf8Error};
 
-use capnp::{message, serialize};
-use distrans_fileindex::Index;
-use veilid_core::ValueData;
+use capnp::{
+    message::{self, ReaderOptions},
+    serialize,
+};
+use distrans_fileindex::{FileSpec, Index, PayloadPiece, PayloadSlice, PayloadSpec};
+use veilid_core::{FromStr, ValueData};
 
 use self::distrans_capnp::index;
 
@@ -22,7 +25,11 @@ pub enum Error {
     #[error("index too large: {0} bytes")]
     IndexTooLarge(usize),
     #[error("{0}")]
-    InvalidPath(PathBuf),
+    EncodePath(PathBuf),
+    #[error("{0}")]
+    DecodePath(#[from] Utf8Error),
+    #[error("{0}")]
+    Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -71,7 +78,7 @@ pub fn encode_index(idx: &Index) -> Result<Vec<u8>> {
                 .path()
                 .as_os_str()
                 .to_str()
-                .ok_or(Error::InvalidPath(idx_file.path().to_owned()))?
+                .ok_or(Error::EncodePath(idx_file.path().to_owned()))?
                 .into(),
         );
     }
@@ -83,8 +90,55 @@ pub fn encode_index(idx: &Index) -> Result<Vec<u8>> {
     Ok(message)
 }
 
-pub fn decode_index(buf: &[u8]) -> Result<Index> {
-    todo!()
+pub fn decode_index(root: PathBuf, buf: &[u8]) -> Result<Index> {
+    let reader = serialize::read_message(buf, ReaderOptions::new())?;
+    let index_reader = reader.get_root::<index::Reader>()?;
+    let payload_reader = index_reader.get_payload()?;
+    let pieces_reader = index_reader.get_pieces()?;
+    let files_reader = index_reader.get_files()?;
+
+    let mut idx_pieces = vec![];
+    for piece in pieces_reader.iter() {
+        let mut piece_digest = [0u8; 32];
+        let piece_digest_reader = piece.get_digest()?;
+        piece_digest[0..8].clone_from_slice(&piece_digest_reader.get_p0().to_be_bytes()[..]);
+        piece_digest[8..16].clone_from_slice(&piece_digest_reader.get_p1().to_be_bytes()[..]);
+        piece_digest[16..24].clone_from_slice(&piece_digest_reader.get_p2().to_be_bytes()[..]);
+        piece_digest[24..32].clone_from_slice(&piece_digest_reader.get_p3().to_be_bytes()[..]);
+        idx_pieces.push(PayloadPiece::new(piece_digest, piece.get_length() as usize));
+    }
+
+    let mut idx_files = vec![];
+    for file in files_reader.iter() {
+        let payload_slice_reader = file.get_contents()?;
+        idx_files.push(FileSpec::new(
+            PathBuf::from_str(file.get_path()?.to_str()?)
+                .map_err(|e| Error::Other(format!("{:?}", e)))?,
+            PayloadSlice::new(
+                payload_slice_reader.get_starting_piece() as usize,
+                payload_slice_reader.get_piece_offset() as usize,
+                payload_slice_reader.get_length() as usize,
+            ),
+        ));
+    }
+
+    let mut payload_digest = [0u8; 32];
+    let payload_digest_reader = payload_reader.get_digest()?;
+    payload_digest[0..8].clone_from_slice(&payload_digest_reader.get_p0().to_be_bytes()[..]);
+    payload_digest[8..16].clone_from_slice(&payload_digest_reader.get_p1().to_be_bytes()[..]);
+    payload_digest[16..24].clone_from_slice(&payload_digest_reader.get_p2().to_be_bytes()[..]);
+    payload_digest[24..32].clone_from_slice(&payload_digest_reader.get_p3().to_be_bytes()[..]);
+
+    let idx = Index::new(
+        root,
+        PayloadSpec::new(
+            payload_digest,
+            payload_reader.get_length() as usize,
+            idx_pieces,
+        ),
+        idx_files,
+    );
+    Ok(idx)
 }
 
 #[cfg(test)]
@@ -94,20 +148,25 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    fn temp_file(pattern: &[u8], count: usize) -> NamedTempFile {
+    fn temp_file(pattern: u8, count: usize) -> NamedTempFile {
         let mut tempf = NamedTempFile::new().expect("temp file");
-        for _ in 0..count {
-            tempf.write(pattern).expect("write temp file");
-        }
+        let contents = vec![pattern; count];
+        tempf.write(contents.as_slice()).expect("write temp file");
         tempf
     }
 
     #[tokio::test]
     async fn round_trip_index() {
-        let tempf = temp_file(b"@", 4194304);
-        let idx = Index::from_file(tempf.path().to_owned()).await.expect("index file");
+        let tempf = temp_file(b'@', 4194304);
+        let idx = Index::from_file(tempf.path().to_owned())
+            .await
+            .expect("index file");
         let message = encode_index(&idx).expect("encode index");
-        let idx2 = decode_index(message.as_slice()).expect("decode index");
+        let idx2 = decode_index(
+            tempf.path().parent().unwrap().to_owned(),
+            message.as_slice(),
+        )
+        .expect("decode index");
         assert_eq!(idx, idx2);
     }
 }
