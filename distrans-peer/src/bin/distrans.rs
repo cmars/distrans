@@ -39,7 +39,7 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .with(
             EnvFilter::builder()
-                .with_default_directive("stress=debug".parse().unwrap())
+                .with_default_directive("distrans=debug".parse().unwrap())
                 .from_env_lossy(),
         )
         .init();
@@ -90,11 +90,13 @@ impl App {
 
         // Encode the index
         let index_bytes = encode_index(&index)?;
+        info!(index_bytes = index_bytes.len());
 
         // Create / open a DHT record for the payload digest
         let dht_rec = self
             .open_or_create_dht_record(index.payload().digest(), index_bytes.len())
             .await?;
+        info!(dht_key = format!("{}", dht_rec.key()));
 
         // Set the subkey values
         self.set_index(dht_rec.key(), index_bytes.as_slice())
@@ -175,11 +177,12 @@ impl App {
                 .open_dht_record(dht_key, dht_owner_keypair)
                 .await?);
         }
+        let o_cnt = (index_length / 32768) + if (index_length % 32768) > 0 { 1 } else { 0 };
         let dht_rec = self
             .routing_context
             .create_dht_record(
                 DHTSchema::DFLT(DHTSchemaDFLT {
-                    o_cnt: (index_length / 32768 + 1) as u16,
+                    o_cnt: o_cnt.try_into().map_err(other_err)?,
                 }),
                 None,
             )
@@ -199,11 +202,12 @@ impl App {
     async fn set_index(&self, dht_key: &CryptoTyped<CryptoKey>, index_bytes: &[u8]) -> Result<()> {
         let mut subkey = 0;
         let mut i: usize = 0;
-        while index_bytes.len() > 0 {
+        while i < index_bytes.len() {
             let take = min(32768, index_bytes.len() - i);
             self.routing_context
                 .set_dht_value(dht_key.clone(), subkey, index_bytes[i..i + take].to_vec())
                 .await?;
+            subkey += 1;
             i += take;
         }
         Ok(())
