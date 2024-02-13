@@ -7,7 +7,7 @@ use tokio::io::AsyncReadExt;
 
 mod error;
 
-use crate::error::{other_err, Error, Result};
+pub use crate::error::{other_err, Error, Result};
 
 const BLOCK_SIZE_BYTES: usize = 32768;
 const PIECE_SIZE_BLOCKS: usize = 32; // 32 * 32KB blocks = 1MB

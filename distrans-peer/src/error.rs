@@ -3,6 +3,8 @@ use std::io;
 use tracing::warn;
 use veilid_core::VeilidAPIError;
 
+use crate::proto;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("io error: {0}")]
@@ -11,6 +13,10 @@ pub enum Error {
     VeilidAPI(#[from] VeilidAPIError),
     #[error("utf-8 encoding error: {0}")]
     Utf8(#[from] std::str::Utf8Error),
+    #[error("fileindex error: {0}")]
+    FileIndex(#[from] distrans_fileindex::Error),
+    #[error("proto error: {0}")]
+    Proto(#[from] proto::Error),
     #[error("other: {0}")]
     Other(String),
 }

@@ -1,12 +1,20 @@
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::{
+    cmp::min,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use clap::{arg, Parser, Subcommand};
+use distrans_fileindex::Index;
 use flume::{unbounded, Receiver, Sender};
 use tracing::{info, trace};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use veilid_core::{
+    CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, DHTSchemaDFLT, KeyPair, RouteId,
+    RoutingContext, Sequencing, VeilidUpdate,
+};
 
-use distrans::{other_err, veilid_config, Error, Result};
-use veilid_core::{DHTRecordDescriptor, RouteId, RoutingContext, Sequencing, VeilidUpdate};
+use distrans::{encode_index, other_err, veilid_config, Error, Result};
 
 #[derive(Parser, Debug)]
 #[command(name = "distrans")]
@@ -21,13 +29,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    Get {
-        dht_key: String,
-        file: String,
-    },
-    Post {
-        file: String,
-    },
+    Get { dht_key: String, file: String },
+    Post { file: String },
 }
 
 #[tokio::main]
@@ -49,21 +52,15 @@ async fn main() {
     app.wait_for_network().await.expect("network");
 
     match cli.commands {
-        Commands::Get{dht_key, file} => {
+        Commands::Get { dht_key, file } => {
             todo!("get")
             // Open the DHT key
             // Fetch the packed index
             // Decode the index
             // Fetch the pieces, write the file
         }
-        Commands::Post{file} => {
-            todo!("post")
-            // Index the file
-            // Create / open a DHT record for the payload digest
-            // Encode the index
-            // Set the subkey values
-            // Mark the leader subkey as ready
-            // Answer app_calls, serve the pieces
+        Commands::Post { file } => {
+            app.post(&file).await.expect("post");
         }
     }
 }
@@ -85,6 +82,25 @@ impl App {
             dht_record: None,
             route_id: None,
         })
+    }
+
+    pub async fn post(&mut self, file: &str) -> Result<()> {
+        // Index the file
+        let index = Index::from_file(file.into()).await?;
+
+        // Encode the index
+        let index_bytes = encode_index(&index)?;
+
+        // Create / open a DHT record for the payload digest
+        let dht_rec = self
+            .open_or_create_dht_record(index.payload().digest(), index_bytes.len())
+            .await?;
+
+        // Set the subkey values
+        self.set_index(dht_rec.key(), index_bytes.as_slice())
+            .await?;
+
+        todo!("post")
     }
 
     async fn new_routing_context(
@@ -140,6 +156,55 @@ impl App {
                     return Err(Error::Other(e.to_string()));
                 }
             };
+        }
+        Ok(())
+    }
+
+    async fn open_or_create_dht_record(
+        &mut self,
+        digest: &[u8],
+        index_length: usize,
+    ) -> Result<DHTRecordDescriptor> {
+        let ts = self.routing_context.api().table_store()?;
+        let db = ts.open("distrans_payload_dht", 2).await?;
+        let maybe_dht_key = db.load_json(0, digest).await?;
+        let maybe_dht_owner_keypair = db.load_json(1, &[]).await?;
+        if let (Some(dht_key), Some(dht_owner_keypair)) = (maybe_dht_key, maybe_dht_owner_keypair) {
+            return Ok(self
+                .routing_context
+                .open_dht_record(dht_key, dht_owner_keypair)
+                .await?);
+        }
+        let dht_rec = self
+            .routing_context
+            .create_dht_record(
+                DHTSchema::DFLT(DHTSchemaDFLT {
+                    o_cnt: (index_length / 32768 + 1) as u16,
+                }),
+                None,
+            )
+            .await?;
+        let dht_owner = KeyPair::new(
+            dht_rec.owner().to_owned(),
+            dht_rec
+                .owner_secret()
+                .ok_or(other_err("expected dht owner secret"))?
+                .to_owned(),
+        );
+        db.store_json(0, &[], dht_rec.key()).await?;
+        db.store_json(1, &[], &dht_owner).await?;
+        Ok(dht_rec)
+    }
+
+    async fn set_index(&self, dht_key: &CryptoTyped<CryptoKey>, index_bytes: &[u8]) -> Result<()> {
+        let mut subkey = 0;
+        let mut i: usize = 0;
+        while index_bytes.len() > 0 {
+            let take = min(32768, index_bytes.len() - i);
+            self.routing_context
+                .set_dht_value(dht_key.clone(), subkey, index_bytes[i..i + take].to_vec())
+                .await?;
+            i += take;
         }
         Ok(())
     }
