@@ -7,11 +7,10 @@ use std::{
 use clap::{arg, Parser, Subcommand};
 use distrans_fileindex::Index;
 use flume::{unbounded, Receiver, Sender};
-use tracing::{info, trace};
+use tracing::{info, trace, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use veilid_core::{
-    CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, DHTSchemaDFLT, KeyPair, RouteId,
-    RoutingContext, Sequencing, VeilidUpdate,
+    CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, DHTSchemaDFLT, FromStr, KeyPair, RouteId, RoutingContext, Sequencing, TypedKey, VeilidUpdate
 };
 
 use distrans::{encode_index, other_err, veilid_config, Error, Result};
@@ -53,11 +52,7 @@ async fn main() {
 
     match cli.commands {
         Commands::Get { dht_key, file } => {
-            todo!("get")
-            // Open the DHT key
-            // Fetch the packed index
-            // Decode the index
-            // Fetch the pieces, write the file
+            app.get(&dht_key, &file).await.expect("get");
         }
         Commands::Post { file } => {
             app.post(&file).await.expect("post");
@@ -84,6 +79,20 @@ impl App {
         })
     }
 
+    pub async fn get(&mut self, dht_key_str: &str, file: &str) -> Result<()> {
+        let dht_key = TypedKey::from_str(dht_key_str)?;
+        let dht_rec = self
+            .routing_context
+            .open_dht_record(dht_key.clone(), None)
+            .await?;
+        let index = self.get_index(dht_rec)?;
+        self.fetch_from_index(index, file.into())?;
+        if let Err(e) = self.routing_context.close_dht_record(dht_key).await {
+            warn!("failed to close dht record");
+        }
+        Ok(())
+    }
+
     pub async fn post(&mut self, file: &str) -> Result<()> {
         // Index the file
         let index = Index::from_file(file.into()).await?;
@@ -102,7 +111,7 @@ impl App {
         self.set_index(dht_rec.key(), index_bytes.as_slice())
             .await?;
 
-        todo!("post")
+        self.handle_post_requests().await
     }
 
     async fn new_routing_context(
@@ -211,5 +220,17 @@ impl App {
             i += take;
         }
         Ok(())
+    }
+
+    async fn handle_post_requests(&self) -> Result<()> {
+        todo!()
+    }
+
+    fn get_index(&self, dht_rec: DHTRecordDescriptor) -> Result<Index> {
+        todo!()
+    }
+
+    fn fetch_from_index(&self, index: Index, file: PathBuf) -> Result<()> {
+        todo!()
     }
 }
