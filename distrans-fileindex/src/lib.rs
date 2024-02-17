@@ -9,8 +9,8 @@ mod error;
 
 pub use crate::error::{other_err, Error, Result};
 
-const BLOCK_SIZE_BYTES: usize = 32768;
-const PIECE_SIZE_BLOCKS: usize = 32; // 32 * 32KB blocks = 1MB
+pub const BLOCK_SIZE_BYTES: usize = 32768;
+pub const PIECE_SIZE_BLOCKS: usize = 32; // 32 * 32KB blocks = 1MB
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Index {

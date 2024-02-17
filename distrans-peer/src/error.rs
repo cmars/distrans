@@ -1,4 +1,4 @@
-use std::io;
+use std::{array::TryFromSliceError, io, num::TryFromIntError};
 
 use tracing::warn;
 use veilid_core::VeilidAPIError;
@@ -17,6 +17,12 @@ pub enum Error {
     FileIndex(#[from] distrans_fileindex::Error),
     #[error("proto error: {0}")]
     Proto(#[from] proto::Error),
+    #[error("{0}")]
+    IntOverflow(#[from] TryFromIntError),
+    #[error("{0}")]
+    SliceSize(#[from] TryFromSliceError),
+    #[error("not ready")]
+    NotReady,
     #[error("other: {0}")]
     Other(String),
 }

@@ -9,7 +9,7 @@ use capnp::{
 use distrans_fileindex::{FileSpec, Index, PayloadPiece, PayloadSlice, PayloadSpec};
 use veilid_core::{FromStr, ValueData};
 
-use self::distrans_capnp::{header, index};
+use self::distrans_capnp::{block_request, header, index};
 
 const MAX_RECORD_DATA_SIZE: usize = 1_048_576;
 const MAX_INDEX_BYTES: usize = MAX_RECORD_DATA_SIZE - ValueData::MAX_LEN;
@@ -106,7 +106,25 @@ pub fn encode_index(idx: &Index) -> Result<Vec<u8>> {
     Ok(message)
 }
 
-#[derive(Debug, PartialEq)]
+pub struct BlockRequest {
+    pub piece: u32,
+    pub block: u8,
+}
+
+pub fn encode_block_request(req: &BlockRequest) -> Result<Vec<u8>> {
+    let mut builder = message::Builder::new_default();
+    let mut request_builder = builder.get_root::<block_request::Builder>()?;
+    request_builder.set_piece(req.piece);
+    request_builder.set_block(req.block);
+
+    let message = serialize::write_message_segments_to_words(&builder);
+    if message.len() > MAX_INDEX_BYTES {
+        return Err(Error::IndexTooLarge(message.len()));
+    }
+    Ok(message)
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct Header {
     payload_digest: [u8; 32],
     payload_length: usize,
@@ -143,6 +161,15 @@ impl Header {
 
     pub fn route_data(&self) -> &[u8] {
         &self.route_data.as_slice()
+    }
+
+    pub fn with_route_data(&self, route_data: Vec<u8>) -> Header {
+        Header {
+            payload_digest: self.payload_digest,
+            payload_length: self.payload_length,
+            subkeys: self.subkeys,
+            route_data,
+        }
     }
 }
 
@@ -204,6 +231,15 @@ pub fn decode_index(root: PathBuf, header: &Header, buf: &[u8]) -> Result<Index>
         idx_files,
     );
     Ok(idx)
+}
+
+pub fn decode_block_request(buf: &[u8]) -> Result<BlockRequest> {
+    let reader = serialize::read_message(buf, ReaderOptions::new())?;
+    let request_reader = reader.get_root::<block_request::Reader>()?;
+    Ok(BlockRequest {
+        piece: request_reader.get_piece(),
+        block: request_reader.get_block(),
+    })
 }
 
 #[cfg(test)]

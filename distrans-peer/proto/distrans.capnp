@@ -1,6 +1,8 @@
 @0xc46f97c2b79df618;
 
-# Logical payload Metadata
+###################################################################
+# DHT record structures
+###################################################################
 
 struct Sha256 {
   p0 @0 :UInt64;
@@ -54,4 +56,15 @@ struct Header {
   payload @0 :Payload;      # Identify the payload offered.
   subkeys @1 :UInt16;       # Number of DHT subkeys following this one; concatenate and decode to get the Index.
   route @2 :Data;           # Private route to request pieces from this peer.
+}
+
+###################################################################
+# app_call protocol structures
+###################################################################
+
+struct BlockRequest {
+  # Request a block
+
+  piece @0 :UInt32;
+  block @1 :UInt8;
 }
