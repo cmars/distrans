@@ -44,17 +44,14 @@ struct Slice {
 }
 
 struct Index {
-  payload @0 :Payload;
-  pieces @1 :List(Piece);
-  files @2 :List(File);
+  pieces @0 :List(Piece);
+  files @1 :List(File);
 }
 
-# Transport-layer packing of the above into DHT constraints
+struct Header {
+  # Describe the payload and how to get it.
 
-struct RecordHeader {
-  subkeys @0 :UInt16;
-  union {
-    nextDhtKey @1 :Text;
-    endOfRecord @2 :Void;
-  }
+  payload @0 :Payload;      # Identify the payload offered.
+  subkeys @1 :UInt16;       # Number of DHT subkeys following this one; concatenate and decode to get the Index.
+  route @2 :Data;           # Private route to request pieces from this peer.
 }
