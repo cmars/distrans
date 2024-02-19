@@ -22,6 +22,7 @@ flume = "0.11"
 futures = "0.3"
 metrics = "0.22"
 metrics-exporter-prometheus = { version = "0.13.0", features = ["http-listener"] }
+path-absolutize = "3.1.1"
 tempdir = "0.3.7"
 thiserror = "1.0"
 tokio = "1.33"

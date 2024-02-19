@@ -7,22 +7,23 @@ use std::{
 use clap::{arg, Parser, Subcommand};
 use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
 use flume::{unbounded, Receiver, Sender};
+use path_absolutize::*;
 use tokio::{
     fs::File,
-    io::{AsyncReadExt, AsyncSeekExt},
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     select,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use veilid_core::{
-    DHTRecordDescriptor, DHTSchema, DHTSchemaDFLT, FromStr, KeyPair, RouteId, RoutingContext,
-    Sequencing, TypedKey, ValueData, VeilidAPIError, VeilidUpdate,
+    CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, DHTSchemaDFLT, FromStr, KeyPair,
+    RouteId, RoutingContext, Sequencing, Target, TypedKey, ValueData, VeilidAPIError, VeilidUpdate,
 };
 
 use distrans::{
-    decode_block_request, encode_header, encode_index, other_err, veilid_config, Error, Header,
-    Result,
+    decode_block_request, decode_header, decode_index, encode_block_request, encode_header,
+    encode_index, other_err, veilid_config, BlockRequest, Error, Header, Result,
 };
 
 #[derive(Parser, Debug)]
@@ -68,6 +69,8 @@ async fn main() {
             app.post(&file).await.expect("post");
         }
     }
+
+    app.routing_context.api().shutdown().await;
 }
 
 #[derive(Clone)]
@@ -117,8 +120,27 @@ impl App {
             .routing_context
             .open_dht_record(dht_key.clone(), None)
             .await?;
-        let index = self.get_index(dht_rec)?;
-        self.fetch_from_index(index, file.into())?;
+
+        let header = self.read_header(dht_rec.key()).await?;
+        debug!(header = format!("{:?}", header));
+
+        let file_path_buf = PathBuf::from(file);
+        let file_path = file_path_buf.absolutize()?;
+        let root = file_path
+            .parent()
+            .ok_or(other_err("cannot locate parent directory"))?;
+        debug!(root = format!("{:?}", root));
+
+        let index = self
+            .read_index(dht_rec.key(), &header, root.to_path_buf())
+            .await?;
+        debug!(index = format!("{:?}", index));
+
+        self.dht_record = Some(dht_rec);
+        self.header = Some(header);
+        self.index = Some(index);
+
+        self.fetch_from_index(root.into()).await?;
         if let Err(e) = self.routing_context.close_dht_record(dht_key).await {
             warn!(err = format!("{}", e), "failed to close dht record");
         }
@@ -241,7 +263,8 @@ impl App {
                 .ok_or(other_err("expected dht owner secret"))?
                 .to_owned(),
         );
-        db.store_json(0, digest_key.as_slice(), dht_rec.key()).await?;
+        db.store_json(0, digest_key.as_slice(), dht_rec.key())
+            .await?;
         db.store_json(1, digest_key.as_slice(), &dht_owner).await?;
         Ok(dht_rec)
     }
@@ -300,12 +323,95 @@ impl App {
         }
     }
 
-    fn get_index(&self, dht_rec: DHTRecordDescriptor) -> Result<Index> {
-        todo!()
+    async fn read_header(&self, dht_key: &CryptoTyped<CryptoKey>) -> Result<Header> {
+        let subkey_value = match self
+            .routing_context
+            .get_dht_value(dht_key.to_owned(), 0, true)
+            .await?
+        {
+            Some(value) => value,
+            None => return Err(Error::NotReady),
+        };
+        Ok(decode_header(subkey_value.data())?)
     }
 
-    fn fetch_from_index(&self, index: Index, file: PathBuf) -> Result<()> {
-        todo!()
+    async fn read_index(
+        &mut self,
+        dht_key: &CryptoTyped<CryptoKey>,
+        header: &Header,
+        root: PathBuf,
+    ) -> Result<Index> {
+        let mut index_bytes = vec![];
+        for i in 0..header.subkeys() {
+            let subkey_value = match self
+                .routing_context
+                .get_dht_value(dht_key.to_owned(), (i+1) as u32, true)
+                .await?
+            {
+                Some(value) => value,
+                None => return Err(Error::NotReady),
+            };
+            index_bytes.extend_from_slice(subkey_value.data());
+        }
+        Ok(decode_index(root, header, index_bytes.as_slice())?)
+    }
+
+    async fn fetch_from_index(&self, root: PathBuf) -> Result<()> {
+        let index = self.index()?;
+        let target = self
+            .routing_context
+            .api()
+            .import_remote_private_route(self.header()?.route_data().to_vec())?;
+        // TODO: this is very fragile and naive.
+        // A real implementation should spawn concurrent requests and retry until complete.
+        for file_spec in index.files().iter() {
+            let file_path = root.join(file_spec.path());
+            debug!(file_path = format!("{:?}", file_path), "creating file to fetch");
+            let mut fh = File::create(&file_path).await?;
+            let mut piece_index = file_spec.contents().starting_piece();
+            let mut piece_offset = file_spec.contents().piece_offset();
+            let mut block_index = piece_offset / BLOCK_SIZE_BYTES;
+            let mut pos = 0;
+            let length = file_spec.contents().length();
+            debug!(
+                file_spec = format!("{:?}", file_spec),
+                pos, length, "fetching file"
+            );
+            while pos < length {
+                let mut block = self
+                    .request_block(
+                        Target::PrivateRoute(target.to_owned()),
+                        piece_index,
+                        block_index,
+                    )
+                    .await?;
+                let block_end = min(block.len(), BLOCK_SIZE_BYTES);
+                fh.write_all(block[piece_offset..block_end].as_mut())
+                    .await?;
+                pos += BLOCK_SIZE_BYTES - piece_offset;
+                piece_offset = 0;
+                block_index += 1;
+                if block_index == PIECE_SIZE_BLOCKS {
+                    piece_index += 1;
+                    block_index = 0;
+                }
+                debug!(pos, piece_index, block_index);
+            }
+        }
+        Ok(())
+    }
+
+    async fn request_block(&self, target: Target, piece: usize, block: usize) -> Result<Vec<u8>> {
+        let block_req = BlockRequest {
+            piece: piece as u32,
+            block: block as u8,
+        };
+        let block_req_bytes = encode_block_request(&block_req)?;
+        let resp_bytes = self
+            .routing_context
+            .app_call(target, block_req_bytes)
+            .await?;
+        Ok(resp_bytes)
     }
 
     async fn write_header(&self) -> Result<()> {
