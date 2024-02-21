@@ -4,7 +4,7 @@ use flume::Receiver;
 use path_absolutize::*;
 use tokio::{fs::File, io::{AsyncReadExt, AsyncSeekExt}, select};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use veilid_core::{
     CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, DHTSchemaDFLT, KeyPair, RoutingContext, ValueData, VeilidAPIError, VeilidUpdate
 };
@@ -131,7 +131,7 @@ impl Seeder {
         }
     }
 
-    pub async fn seed(&mut self, cancel: CancellationToken, updates: Receiver<VeilidUpdate>) -> Result<()> {
+    pub async fn seed(mut self, cancel: CancellationToken, updates: Receiver<VeilidUpdate>) -> Result<()> {
         if self.index.files().len() > 1 {
             todo!("multi-file seeding not yet supported, sorry!");
         }
@@ -150,10 +150,15 @@ impl Seeder {
                 }
                 _ = cancel.cancelled() => {
                     info!("seeding cancelled");
-                    return Ok(())
+                    break
                 }
             }
         }
+
+        if let Err(e) = self.routing_context.close_dht_record(self.dht_key).await {
+            warn!(err = format!("{:?}", e), "failed to close DHT record");
+        }
+        Ok(())
     }
 
     async fn handle_update(&mut self, fh: &mut File, buf: &mut [u8], update: VeilidUpdate) -> Result<()> {
