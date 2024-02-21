@@ -1,5 +1,3 @@
-use std::process::Command;
-
 fn main() {
     // Compile Capn'Proto
     ::capnpc::CompilerCommand::new()
