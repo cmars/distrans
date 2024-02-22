@@ -6,8 +6,9 @@ use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
 use flume::{unbounded, Receiver, Sender};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, warn};
 use veilid_core::{CryptoKey, CryptoTyped, FromStr, RoutingContext, Target, TypedKey};
 
 use crate::proto::{decode_header, decode_index, encode_block_request, BlockRequest, Header};
@@ -16,10 +17,9 @@ use crate::{other_err, Error, Result};
 #[derive(Clone)]
 pub struct Fetcher {
     routing_context: RoutingContext,
-    dht_key: CryptoTyped<CryptoKey>,
     header: Header,
     index: Index,
-    root: PathBuf,
+    dht_key: CryptoTyped<CryptoKey>,
 }
 
 impl Fetcher {
@@ -29,7 +29,7 @@ impl Fetcher {
         root: &str,
     ) -> Result<Fetcher> {
         let dht_key = TypedKey::from_str(dht_key_str)?;
-        let dht_rec = routing_context
+        routing_context
             .open_dht_record(dht_key.clone(), None)
             .await?;
 
@@ -42,10 +42,9 @@ impl Fetcher {
 
         Ok(Fetcher {
             routing_context,
-            dht_key: dht_rec.key().to_owned(),
             header,
             index,
-            root: root_path_buf,
+            dht_key,
         })
     }
 
@@ -87,21 +86,35 @@ impl Fetcher {
         )?)
     }
 
-    pub async fn fetch(mut self, cancel: CancellationToken) -> Result<()> {
+    pub async fn fetch(self, cancel: CancellationToken) -> Result<()> {
         let (sender, receiver) = unbounded();
 
         let index = self.index.clone();
-        let enqueue_handle = tokio::spawn(Self::enqueue_blocks(cancel.clone(), sender, index));
+        let mut tasks = JoinSet::new();
+        tasks.spawn(Self::enqueue_blocks(cancel.clone(), sender, index));
+        tasks.spawn(self.clone().fetch_blocks(cancel.clone(), receiver));
+        let mut result = Ok(());
+        while let Some(join_res) = tasks.join_next().await {
+            match join_res {
+                Ok(res) => {
+                    if let Err(e) = res {
+                        warn!(err = format!("{}", e));
+                        result = Err(e);
+                    }
+                }
+                Err(e) => {
+                    result = Err(other_err(e))
+                }
+            }
+        }
 
-        let fetcher_handle = tokio::spawn(self.clone().fetch_blocks(cancel.clone(), receiver));
-        drop(self);
-
-        // TODO: find a better join
-        tokio::try_join!(enqueue_handle, fetcher_handle).map_err(other_err)?;
-        Ok(())
+        if let Err(e) = self.routing_context.close_dht_record(self.dht_key.to_owned()).await {
+            warn!(err = format!("{}", e), "failed to close DHT record");
+        }
+        result
     }
 
-    async fn fetch_blocks(mut self, cancel: CancellationToken, receiver: Receiver<FileBlockFetch>) -> Result<()> {
+    async fn fetch_blocks(self, cancel: CancellationToken, receiver: Receiver<FileBlockFetch>) -> Result<()> {
         let mut fh_map: HashMap<usize, File> = HashMap::new();
         let target = self.routing_context.api().import_remote_private_route(self.header.route_data().to_vec())?;
         loop {

@@ -4,7 +4,7 @@ use std::{
     sync::Arc, time::Duration,
 };
 
-use distrans::{other_err, veilid_config, Error, Result};
+use distrans_peer::{other_err, veilid_config, Error, Result};
 
 use clap::{command, Parser};
 use flume::{unbounded, Receiver, Sender};
