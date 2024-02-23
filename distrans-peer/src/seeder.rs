@@ -136,6 +136,7 @@ impl Seeder {
             todo!("multi-file seeding not yet supported, sorry!");
         }
         let local_single_file = self.index.root().join(self.index.files()[0].path());
+        info!(dht_key = format!("{}", self.dht_key), file = format!("{:?}", local_single_file), "seeding");
         let mut fh: File = File::open(local_single_file).await?;
         let mut buf = [0u8; BLOCK_SIZE_BYTES];
 

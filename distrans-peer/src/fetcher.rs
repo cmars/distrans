@@ -122,8 +122,14 @@ impl Fetcher {
                 recv_fetch = receiver.recv_async() => {
                     let fetch = match recv_fetch {
                         Ok(fetch) => fetch,
-                        Err(e) => return Err(other_err(e)),
+                        Err(e) => {
+                            // See https://docs.rs/flume/latest/flume/struct.Receiver.html#method.recv_async
+                            // An error here means "channel is closed" effectively. Makes me miss Go.
+                            debug!(err = format!("{}", e), "all senders have been dropped");
+                            return Ok(())
+                        }
                     };
+                    debug!(fetch = format!("{:?}", fetch));
                     let fh = match fh_map.get_mut(&fetch.file_index) {
                         Some(fh) => fh,
                         None => {
@@ -193,6 +199,7 @@ impl Fetcher {
         }
 }
 
+#[derive(Debug)]
 struct FileBlockFetch {
     file_index: usize,
     piece_index: usize,
