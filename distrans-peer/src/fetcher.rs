@@ -1,6 +1,7 @@
 use std::cmp::min;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
 use flume::{unbounded, Receiver, Sender};
@@ -91,8 +92,8 @@ impl Fetcher {
 
         let index = self.index.clone();
         let mut tasks = JoinSet::new();
-        tasks.spawn(Self::enqueue_blocks(cancel.clone(), sender, index));
-        tasks.spawn(self.clone().fetch_blocks(cancel.clone(), receiver));
+        tasks.spawn(Self::enqueue_blocks(cancel.clone(), sender.clone(), index));
+        tasks.spawn(self.clone().fetch_blocks(cancel.clone(), sender, receiver));
         let mut result = Ok(());
         while let Some(join_res) = tasks.join_next().await {
             match join_res {
@@ -102,21 +103,32 @@ impl Fetcher {
                         result = Err(e);
                     }
                 }
-                Err(e) => {
-                    result = Err(other_err(e))
-                }
+                Err(e) => result = Err(other_err(e)),
             }
         }
 
-        if let Err(e) = self.routing_context.close_dht_record(self.dht_key.to_owned()).await {
+        if let Err(e) = self
+            .routing_context
+            .close_dht_record(self.dht_key.to_owned())
+            .await
+        {
             warn!(err = format!("{}", e), "failed to close DHT record");
         }
         result
     }
 
-    async fn fetch_blocks(self, cancel: CancellationToken, receiver: Receiver<FileBlockFetch>) -> Result<()> {
+    async fn fetch_blocks(
+        self,
+        cancel: CancellationToken,
+        sender: Sender<FileBlockFetch>,
+        receiver: Receiver<FileBlockFetch>,
+    ) -> Result<()> {
         let mut fh_map: HashMap<usize, File> = HashMap::new();
-        let target = self.routing_context.api().import_remote_private_route(self.header.route_data().to_vec())?;
+        let target = self
+            .routing_context
+            .api()
+            .import_remote_private_route(self.header.route_data().to_vec())?;
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {
                 recv_fetch = receiver.recv_async() => {
@@ -125,27 +137,45 @@ impl Fetcher {
                         Err(e) => {
                             // See https://docs.rs/flume/latest/flume/struct.Receiver.html#method.recv_async
                             // An error here means "channel is closed" effectively. Makes me miss Go.
+                            // This is practically impossible given we have a sender in scope here for retries...
                             debug!(err = format!("{}", e), "all senders have been dropped");
                             return Ok(())
                         }
                     };
                     debug!(fetch = format!("{:?}", fetch));
-                    let fh = match fh_map.get_mut(&fetch.file_index) {
-                        Some(fh) => fh,
-                        None => {
-                            let path = self.index.files()[fetch.file_index].path();
-                            let fh = File::options().write(true).truncate(false).create(true).open(path).await?;
-                            fh_map.insert(fetch.file_index, fh);
-                            fh_map.get_mut(&fetch.file_index).unwrap()
-                        }
-                    };
-                    let mut block = self.request_block(
-                        Target::PrivateRoute(target.to_owned()),
-                        fetch.piece_index,
-                        fetch.block_index,
-                    ).await?;
-                    let block_end = min(block.len(), BLOCK_SIZE_BYTES);
-                    fh.write_all(block[fetch.piece_offset..block_end].as_mut()).await?;
+                    let fetch_result: Result<()> = async {
+                        let fh = match fh_map.get_mut(&fetch.file_index) {
+                            Some(fh) => fh,
+                            None => {
+                                let path = self.index.root().join(self.index.files()[fetch.file_index].path());
+                                let fh = File::options().write(true).truncate(false).create(true).open(path).await?;
+                                fh_map.insert(fetch.file_index, fh);
+                                fh_map.get_mut(&fetch.file_index).unwrap()
+                            }
+                        };
+                        let mut block = self.request_block(
+                            Target::PrivateRoute(target.to_owned()),
+                            fetch.piece_index,
+                            fetch.block_index,
+                        ).await?;
+                        let block_end = min(block.len(), BLOCK_SIZE_BYTES);
+                        fh.write_all(block[fetch.piece_offset..block_end].as_mut()).await?;
+                        // TODO: update piece completion; we could verify
+                        // concurrently with fetching other pieces, reject &
+                        // requeue bad ones...
+                        Ok(())
+                    }.await;
+                    if let Err(e) = fetch_result {
+                        warn!(err = format!("{}", e), "fetch block failed, queued for retry");
+                        sender.send(fetch).map_err(other_err)?;
+                    }
+                }
+                _ = heartbeat.tick() => {
+                    if receiver.is_empty() {
+                        debug!("all blocks have been fetched");
+                        // TODO: verify pieces!!!
+                        return Ok(())
+                    }
                 }
                 _ = cancel.cancelled() => {
                     return Err(other_err("cancelled"))
@@ -167,36 +197,39 @@ impl Fetcher {
         Ok(resp_bytes)
     }
 
-
-    async fn enqueue_blocks(cancel: CancellationToken, sender: Sender<FileBlockFetch>, index: Index) -> Result<()> {
-            for (file_index, file_spec) in index.files().iter().enumerate() {
-                let mut piece_index = file_spec.contents().starting_piece();
-                let mut piece_offset = file_spec.contents().piece_offset();
-                let mut block_index = piece_offset / BLOCK_SIZE_BYTES;
-                let mut pos = 0;
-                while pos < file_spec.contents().length() {
-                    if cancel.is_cancelled() {
-                        return Err(other_err("cancelled"));
-                    }
-                    sender
-                        .send(FileBlockFetch {
-                            file_index,
-                            piece_index,
-                            piece_offset,
-                            block_index,
-                        })
-                        .map_err(other_err)?;
-                    pos += BLOCK_SIZE_BYTES - piece_offset;
-                    piece_offset = 0;
-                    block_index += 1;
-                    if block_index == PIECE_SIZE_BLOCKS {
-                        piece_index += 1;
-                        block_index = 0;
-                    }
+    async fn enqueue_blocks(
+        cancel: CancellationToken,
+        sender: Sender<FileBlockFetch>,
+        index: Index,
+    ) -> Result<()> {
+        for (file_index, file_spec) in index.files().iter().enumerate() {
+            let mut piece_index = file_spec.contents().starting_piece();
+            let mut piece_offset = file_spec.contents().piece_offset();
+            let mut block_index = piece_offset / BLOCK_SIZE_BYTES;
+            let mut pos = 0;
+            while pos < file_spec.contents().length() {
+                if cancel.is_cancelled() {
+                    return Err(other_err("cancelled"));
+                }
+                sender
+                    .send(FileBlockFetch {
+                        file_index,
+                        piece_index,
+                        piece_offset,
+                        block_index,
+                    })
+                    .map_err(other_err)?;
+                pos += BLOCK_SIZE_BYTES - piece_offset;
+                piece_offset = 0;
+                block_index += 1;
+                if block_index == PIECE_SIZE_BLOCKS {
+                    piece_index += 1;
+                    block_index = 0;
                 }
             }
-            Ok(())
         }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]

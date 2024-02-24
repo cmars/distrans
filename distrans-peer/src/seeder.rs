@@ -28,6 +28,7 @@ impl Seeder {
         let abs_file = file_path_buf.absolutize()?;
 
         // Build an index of the content to be shared
+        info!(path = format!("{:?}", file_path_buf), "indexing file");
         let index = Index::from_file(abs_file.into()).await?;
         let index_bytes = encode_index(&index)?;
 
