@@ -16,7 +16,7 @@ path = "src/lib.rs"
 
 [dependencies]
 capnp = "0.18"
-distrans_fileindex = {path = "../distrans-fileindex"}
+distrans_fileindex = "0.1.0"
 flume = "0.11"
 path-absolutize = "3.1.1"
 thiserror = "1.0"
