@@ -1,34 +1,28 @@
 [package]
-name = "distrans-peer"
-version = "0.1.0"
-edition = "2021"
+name = "distrans_peer"
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+documentation = "https://docs.rs/distrans-peer"
+description = "Distrans p2p protocol and agent components"
 build = "build.rs"
 
 [lib]
 name = "distrans_peer"
 path = "src/lib.rs"
 
-[[bin]]
-name = "distrans"
-
-[[bin]]
-name = "stress"
-
 [dependencies]
 capnp = "0.18"
-clap = {version = "4.4", features = ["derive", "env"]}
-distrans-fileindex = {path = "../distrans-fileindex"}
+distrans_fileindex = {path = "../distrans-fileindex"}
 flume = "0.11"
-futures = "0.3"
-metrics = "0.22"
-metrics-exporter-prometheus = { version = "0.13.0", features = ["http-listener"] }
 path-absolutize = "3.1.1"
-tempdir = "0.3.7"
 thiserror = "1.0"
 tokio = "1.33"
 tokio-util = "0.7"
 tracing = { version = "0.1", features = ["log", "attributes"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 veilid-core = "0.2.5"
 
 [build-dependencies]

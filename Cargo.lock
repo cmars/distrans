@@ -858,7 +858,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "distrans-fileindex"
+name = "distrans"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "distrans_fileindex",
+ "distrans_peer",
+ "flume",
+ "futures",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "veilid-core",
+]
+
+[[package]]
+name = "distrans_fileindex"
 version = "0.1.0"
 dependencies = [
  "hex-literal",
@@ -869,17 +887,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "distrans-peer"
+name = "distrans_peer"
 version = "0.1.0"
 dependencies = [
  "capnp",
  "capnpc",
- "clap",
- "distrans-fileindex",
+ "distrans_fileindex",
  "flume",
- "futures",
- "metrics",
- "metrics-exporter-prometheus",
  "path-absolutize",
  "tempdir",
  "tempfile",
@@ -887,7 +901,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
  "veilid-core",
 ]
 

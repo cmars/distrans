@@ -4,3 +4,43 @@ members = [
   "distrans-peer",
   "distrans-fileindex",
 ]
+
+[workspace.package]
+authors = ["Casey Marshall <me@cmars.tech>"]
+documentation = "https://gitlab.com/cmars232/distrans"
+edition = "2021"
+homepage = "https://gitlab.com/cmars232/distrans"
+license = "MPL-2.0"
+repository = "https://gitlab.com/cmars232/distrans"
+version = "0.1.0"
+
+[package]
+name = "distrans"
+description = "Anonymous decentralized file distribution and transfer"
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "distrans"
+
+[[bin]]
+name = "stress"
+
+[dependencies]
+clap = {version = "4.4", features = ["derive", "env"]}
+distrans_fileindex = { path = "distrans-fileindex" }
+distrans_peer = { path = "distrans-peer" }
+flume = "0.11"
+futures = "0.3"
+metrics = "0.22"
+metrics-exporter-prometheus = { version = "0.13.0", features = ["http-listener"] }
+tokio = "1.33"
+tokio-util = "0.7"
+tracing = { version = "0.1", features = ["log", "attributes"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+veilid-core = "0.2.5"
