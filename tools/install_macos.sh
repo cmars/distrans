@@ -7,6 +7,8 @@ trap "rm -rf $build_dir" EXIT
 
 brew install capnp
 
+PROTOC_VERSION="24.3" # Keep in sync with veilid-core/build.rs
+
 UNAME_M=$(uname -m)
 if [[ "$UNAME_M" == "x86_64" ]]; then 
     PROTOC_ARCH=x86_64

@@ -6,6 +6,7 @@ set -eux
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
 brew install capnp
+CAPNP=$(which capnp)
 
 PROTOC_VERSION="24.3" # Keep in sync with veilid-core/build.rs
 
@@ -26,6 +27,8 @@ unzip protoc-$PROTOC_VERSION-$PROTOC_OS-$PROTOC_ARCH.zip
 chmod +x bin/*
 sudo cp -r bin/* /usr/local/bin/
 sudo cp -r include/* /usr/local/include/
+
+sudo ln -s $CAPNP /usr/local/bin
 
 capnp --version
 protoc --version
