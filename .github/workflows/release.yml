@@ -104,6 +104,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
+      DOCS_RS: skip-veilid-capnp-hack
     steps:
       - uses: actions/checkout@v4
         with:
