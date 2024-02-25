@@ -3,6 +3,7 @@
 set -eux
 
 # TODO: support windows somehow
+UNAME_S=$(uname -s)
 
 CAPNP_VERSION="1.0.2"
 PROTOC_VERSION="24.3" # Keep in sync with veilid-core/build.rs
@@ -34,12 +35,18 @@ else
     exit 1
 fi 
 PROTOC_OS="linux"
-if [ "$(uname -o)" == "Darwin" ]; then
-    PROTOC_OS="osx"
+if [[ "$UNAME_S" == "Linux" ]]; then
+    PROTOC_OS=linux
+elif [[ "$UNAME_S" == "Darwin" ]]; then
+    PROTOC_ARCH=osx
+else
+    echo Unsupported OS $UNAME_S
+    exit 1
 fi
 
 curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-$PROTOC_OS-$PROTOC_ARCH.zip
 unzip protoc-$PROTOC_VERSION-$PROTOC_OS-$PROTOC_ARCH.zip
+chmod +x bin/*
 sudo cp -r bin/* /usr/local/bin/
 sudo cp -r include/* /usr/local/include/
 popd
