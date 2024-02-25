@@ -7,11 +7,11 @@ members = [
 
 [workspace.package]
 authors = ["Casey Marshall <me@cmars.tech>"]
-documentation = "https://gitlab.com/cmars232/distrans"
+documentation = "https://github.com/cmars/distrans"
 edition = "2021"
-homepage = "https://gitlab.com/cmars232/distrans"
+homepage = "https://github.com/cmars/distrans"
 license = "MPL-2.0"
-repository = "https://gitlab.com/cmars232/distrans"
+repository = "https://github.com/cmars/distrans"
 version = "0.1.0"
 
 # Config for 'cargo dist'
