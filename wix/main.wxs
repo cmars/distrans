@@ -182,7 +182,7 @@
         <!--<Icon Id='ProductICO' SourceFile='wix\Product.ico'/>-->
         <!--<Property Id='ARPPRODUCTICON' Value='ProductICO' />-->
 
-        <Property Id='ARPHELPLINK' Value='https://gitlab.com/cmars232/distrans'/>
+        <Property Id='ARPHELPLINK' Value='https://github.com/cmars/distrans'/>
         
         <UI>
             <UIRef Id='WixUI_FeatureTree'/>
