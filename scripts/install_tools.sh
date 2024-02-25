@@ -38,7 +38,7 @@ PROTOC_OS="linux"
 if [[ "$UNAME_S" == "Linux" ]]; then
     PROTOC_OS=linux
 elif [[ "$UNAME_S" == "Darwin" ]]; then
-    PROTOC_ARCH=osx
+    PROTOC_OS=osx
 else
     echo Unsupported OS $UNAME_S
     exit 1
