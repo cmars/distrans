@@ -19,6 +19,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install capnproto & protobuf needed by veilid & distrans
+        run: |
+          ./scripts/install_tools.sh
+
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@v0.5
         env:
