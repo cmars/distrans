@@ -28,6 +28,8 @@ targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-
 pr-run-mode = "upload"
 # Where to host releases
 hosting = ["github"]
+# Allow dirty necessary as we've had to customize the action
+allow-dirty = ["ci"]
 
 [package]
 name = "distrans"
