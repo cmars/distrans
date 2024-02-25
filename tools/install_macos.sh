@@ -5,7 +5,7 @@ set -eux
 build_dir=$(mktemp -d)
 trap "rm -rf $build_dir" EXIT
 
-brew install capnproto
+brew install capnp
 
 UNAME_M=$(uname -m)
 if [[ "$UNAME_M" == "x86_64" ]]; then 

@@ -122,7 +122,7 @@ jobs:
         run: |
           ${{ matrix.packages_install }}
       - name: Install capnproto & protobuf for linux
-        run: ./tools/install_linux.sh
+        run: ./tools/install_ubuntu.sh
         if: startsWith(matrix.runner, 'ubuntu')
       - name: Install capnproto & protobuf for macos
         run: ./tools/install_macos.sh

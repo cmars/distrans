@@ -5,7 +5,7 @@ set -eux
 # Enable brew
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
-brew install capnproto
+brew install capnp
 
 PROTOC_VERSION="24.3" # Keep in sync with veilid-core/build.rs
 
