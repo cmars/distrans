@@ -54,8 +54,8 @@ name = "stress"
 
 [dependencies]
 clap = {version = "4.4", features = ["derive", "env"]}
-distrans_fileindex = "0.1.0"
-distrans_peer = "0.1.0"
+distrans_fileindex = "0.1"
+distrans_peer = "0.1"
 flume = "0.11"
 futures = "0.3"
 metrics = "0.22"

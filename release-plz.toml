@@ -25,3 +25,9 @@ publish_allow_dirty = false
 
 # disable running `cargo-semver-checks`
 semver_check = false
+
+[[package]]
+name = "distrans_fileindex"
+
+[[package]]
+name = "distrans_peer"
