@@ -2,6 +2,10 @@
 
 set -eux
 
+build_dir=$(mktemp -d)
+trap "rm -rf $build_dir" EXIT
+cd $build_dir
+
 # Enable brew
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
