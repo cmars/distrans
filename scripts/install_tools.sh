@@ -40,5 +40,9 @@ fi
 
 curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-$PROTOC_OS-$PROTOC_ARCH.zip
 unzip protoc-$PROTOC_VERSION-$PROTOC_OS-$PROTOC_ARCH.zip
-sudo cp -r bin include /usr/local/
+sudo cp -r bin/* /usr/local/bin/
+sudo cp -r include/* /usr/local/include/
 popd
+
+/usr/local/bin/capnp --version
+/usr/local/bin/protoc --version
