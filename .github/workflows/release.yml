@@ -129,7 +129,7 @@ jobs:
           cd capnproto-c++-1.0.2
           ./configure
           make -j6 check
-          make install
+          sudo make install
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
