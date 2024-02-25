@@ -104,7 +104,6 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
-      DOCS_RS: skip-veilid-capnp-hack
     steps:
       - uses: actions/checkout@v4
         with:
@@ -122,6 +121,15 @@ jobs:
       - name: Install dependencies
         run: |
           ${{ matrix.packages_install }}
+      - name: Install capnproto
+        run: |
+          cd /tmp
+          curl -O https://capnproto.org/capnproto-c++-1.0.2.tar.gz
+          tar zxf capnproto-c++-1.0.2.tar.gz
+          cd capnproto-c++-1.0.2
+          ./configure
+          make -j6 check
+          make install
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
