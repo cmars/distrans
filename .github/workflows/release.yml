@@ -121,9 +121,12 @@ jobs:
       - name: Install dependencies
         run: |
           ${{ matrix.packages_install }}
-      - name: Install capnproto & protobuf needed by veilid & distrans
-        run: |
-          ./scripts/install_tools.sh
+      - name: Install capnproto & protobuf for linux
+        run: ./scripts/install_linux.sh
+        if: startsWith(matrix.os, 'ubuntu')
+      - name: Install capnproto & protobuf for macos
+        run: ./scripts/install_macos.sh
+        if: startsWith(matrix.os, 'macos')
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
