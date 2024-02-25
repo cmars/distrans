@@ -862,8 +862,8 @@ name = "distrans"
 version = "0.1.0"
 dependencies = [
  "clap",
- "distrans_fileindex",
- "distrans_peer",
+ "distrans_fileindex 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "distrans_peer 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "flume",
  "futures",
  "metrics",
@@ -887,16 +887,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "distrans_fileindex"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd2610cfe612d779413f85c9fa62e6f6e15854c4eee6ee4fdcbb8cf37d71a9da"
+dependencies = [
+ "rust-crypto",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "distrans_peer"
 version = "0.1.0"
 dependencies = [
  "capnp",
  "capnpc",
- "distrans_fileindex",
+ "distrans_fileindex 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "flume",
  "path-absolutize",
- "tempdir",
  "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "veilid-core",
+]
+
+[[package]]
+name = "distrans_peer"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2738856282476d2e91c69d62edf5d3d4e9527e2dc64e578f12b0c83758c2e6fe"
+dependencies = [
+ "capnp",
+ "capnpc",
+ "distrans_fileindex 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "flume",
+ "path-absolutize",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -2827,15 +2855,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
 
 [[package]]
-name = "remove_dir_all"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3acd125665422973a33ac9d3dd2df85edad0f4ae9b00dafb1a05e43a9f5ef8e7"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "resolv-conf"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3446,16 +3465,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "tempdir"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15f2b5fb00ccdf689e0149d1b1b3c03fead81c2b37735d812fa8bddbbf41b6d8"
-dependencies = [
- "rand 0.4.6",
- "remove_dir_all",
 ]
 
 [[package]]

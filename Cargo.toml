@@ -14,6 +14,19 @@ license = "MPL-2.0"
 repository = "https://gitlab.com/cmars232/distrans"
 version = "0.1.0"
 
+# Config for 'cargo dist'
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.11.1"
+# CI backends to support
+ci = ["github"]
+# The installers to generate for each app
+installers = ["shell", "powershell", "msi"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+# Publish jobs to run in CI
+pr-run-mode = "upload"
+
 [package]
 name = "distrans"
 description = "Anonymous decentralized file distribution and transfer"
@@ -44,3 +57,13 @@ tokio-util = "0.7"
 tracing = { version = "0.1", features = ["log", "attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 veilid-core = "0.2.5"
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+
+# The profile that 'cargo dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
