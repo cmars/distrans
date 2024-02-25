@@ -19,9 +19,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install capnproto & protobuf needed by veilid & distrans
-        run: |
-          ./scripts/install_tools.sh
+      - name: Install capnproto & protobuf for linux
+        run: ./scripts/install_linux.sh
+        if: startsWith(matrix.os, 'ubuntu')
+      - name: Install capnproto & protobuf for macos
+        run: ./scripts/install_macos.sh
+        if: startsWith(matrix.os, 'macos')
 
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@v0.5
