@@ -8,7 +8,7 @@ CAPNP_VERSION="1.0.2"
 PROTOC_VERSION="24.3" # Keep in sync with veilid-core/build.rs
 
 build_dir=$(mktemp -d)
-trap "rm -rf $build_dir" EXIT
+trap "sudo rm -rf $build_dir" EXIT
 
 cd $build_dir
 mkdir -p capnp-build protoc-install
