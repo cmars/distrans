@@ -121,15 +121,9 @@ jobs:
       - name: Install dependencies
         run: |
           ${{ matrix.packages_install }}
-      - name: Install capnproto
+      - name: Install capnproto & protobuf needed by veilid & distrans
         run: |
-          cd /tmp
-          curl -O https://capnproto.org/capnproto-c++-1.0.2.tar.gz
-          tar zxf capnproto-c++-1.0.2.tar.gz
-          cd capnproto-c++-1.0.2
-          ./configure
-          make -j6 check
-          sudo make install
+          ./scripts/install_tools.sh
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
