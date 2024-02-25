@@ -856,11 +856,11 @@ dependencies = [
 
 [[package]]
 name = "distrans"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "clap",
- "distrans_fileindex 0.1.0",
- "distrans_peer 0.1.0",
+ "distrans_fileindex 0.1.1",
+ "distrans_peer 0.1.1",
  "flume",
  "futures",
  "metrics",
@@ -874,9 +874,9 @@ dependencies = [
 
 [[package]]
 name = "distrans_fileindex"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd2610cfe612d779413f85c9fa62e6f6e15854c4eee6ee4fdcbb8cf37d71a9da"
+checksum = "8d44a4f6104bc047c9fc66e15e1d67524bb49746e48c12ae14ba32d746952828"
 dependencies = [
  "rust-crypto",
  "thiserror",
@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "distrans_fileindex"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "hex-literal",
  "rust-crypto",
@@ -896,13 +896,13 @@ dependencies = [
 
 [[package]]
 name = "distrans_peer"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2738856282476d2e91c69d62edf5d3d4e9527e2dc64e578f12b0c83758c2e6fe"
+checksum = "8e89501f6370da9332f498caa4fafd1373fcb3e00ec27ef4d6a520a5c70a5778"
 dependencies = [
  "capnp",
  "capnpc",
- "distrans_fileindex 0.1.0",
+ "distrans_fileindex 0.1.1",
  "flume",
  "path-absolutize",
  "thiserror",
@@ -914,11 +914,11 @@ dependencies = [
 
 [[package]]
 name = "distrans_peer"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "capnp",
  "capnpc",
- "distrans_fileindex 0.1.0",
+ "distrans_fileindex 0.1.1",
  "flume",
  "path-absolutize",
  "tempfile",
