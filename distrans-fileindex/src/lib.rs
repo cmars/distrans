@@ -1,9 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::{
+    cmp::min,
+    path::{Path, PathBuf},
+};
 
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
-use tokio::fs::File;
+use flume::{unbounded, Receiver, Sender};
 use tokio::io::AsyncReadExt;
+use tokio::{fs::File, task::JoinSet};
 
 mod error;
 
@@ -11,6 +15,8 @@ pub use crate::error::{other_err, Error, Result};
 
 pub const BLOCK_SIZE_BYTES: usize = 32768;
 pub const PIECE_SIZE_BLOCKS: usize = 32; // 32 * 32KB blocks = 1MB
+const PIECE_SIZE_BYTES: usize = PIECE_SIZE_BLOCKS * BLOCK_SIZE_BYTES;
+const INDEX_BUFFER_SIZE: usize = 67108864; // 64MB
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Index {
@@ -187,46 +193,120 @@ impl PayloadSpec {
     }
 
     pub fn digest(&self) -> &[u8] {
-        return &self.digest[..];
+        &self.digest[..]
     }
 
     pub fn length(&self) -> usize {
-        return self.length;
+        self.length
     }
 
     pub fn pieces(&self) -> &Vec<PayloadPiece> {
-        return &self.pieces;
+        &self.pieces
     }
 
     pub async fn from_file(file: impl AsRef<Path>) -> Result<PayloadSpec> {
         let mut fh = File::open(file).await?;
-        let mut buf = [0u8; BLOCK_SIZE_BYTES];
+        let file_meta = fh.metadata().await?;
         let mut payload = PayloadSpec::default();
-        let mut payload_digest = Sha256::new();
-        loop {
-            let mut piece = PayloadPiece {
-                digest: [0u8; 32],
-                length: 0,
+
+        let (task_sender, task_receiver) = unbounded::<Option<ScanTask>>();
+        let (result_sender, result_receiver) = unbounded::<ScanResult>();
+        let mut scanners = JoinSet::new();
+
+        let n_tasks = file_meta.len() as usize / INDEX_BUFFER_SIZE
+            + if file_meta.len() as usize % INDEX_BUFFER_SIZE > 0 {
+                1
+            } else {
+                0
             };
-            let mut piece_digest = Sha256::new();
-            for _ in 0..PIECE_SIZE_BLOCKS {
-                let rd = fh.read(&mut buf[..]).await?;
+        for _ in 0..n_tasks {
+            scanners.spawn(Self::scan(task_receiver.clone(), result_sender.clone()));
+        }
+
+        let mut payload_digest = Sha256::new();
+        for scan_index in 0..n_tasks {
+            let mut scan = ScanTask {
+                offset: scan_index * INDEX_BUFFER_SIZE,
+                buf: vec![0u8; INDEX_BUFFER_SIZE],
+                rd: 0,
+            };
+            let mut total_rd = 0;
+            while total_rd < INDEX_BUFFER_SIZE {
+                let rd = fh.read(&mut scan.buf[total_rd..INDEX_BUFFER_SIZE]).await?;
                 if rd == 0 {
                     break;
                 }
-                payload.length += rd;
-                piece.length += rd;
-                payload_digest.input(&buf[..rd]);
-                piece_digest.input(&buf[..rd]);
+                total_rd += rd;
             }
-            if piece.length == 0 {
-                payload_digest.result(&mut payload.digest[..]);
-                return Ok(payload);
+            scan.rd = total_rd;
+            if scan.rd > 0 {
+                payload_digest.input(&scan.buf[..scan.rd]);
+                task_sender
+                    .send_async(Some(scan))
+                    .await
+                    .map_err(other_err)?;
             }
-            piece_digest.result(&mut piece.digest[..]);
-            payload.pieces.push(piece)
+        }
+        loop {
+            task_sender.send_async(None).await.map_err(other_err)?;
+            match scanners.join_next().await {
+                None => break,
+                Some(Err(e)) => return Err(other_err(e)),
+                Some(Ok(Err(e))) => return Err(other_err(e)),
+                Some(Ok(Ok(()))) => {}
+            }
+        }
+        drop(task_sender);
+
+        let mut scan_result: Vec<ScanResult> = result_receiver.drain().collect();
+        scan_result.sort_by_key(|r| r.piece_index);
+        payload.pieces = scan_result.drain(..).map(|r| r.piece).collect();
+        if payload.pieces.len() > 0 {
+            payload.length = (payload.pieces.len() - 1) * PIECE_SIZE_BYTES;
+            payload.length += payload.pieces[payload.pieces.len() - 1].length;
+        }
+        payload_digest.result(&mut payload.digest[..]);
+        Ok(payload)
+    }
+
+    async fn scan(receiver: Receiver<Option<ScanTask>>, sender: Sender<ScanResult>) -> Result<()> {
+        loop {
+            match receiver.recv_async().await {
+                Ok(None) => return Ok(()),
+                Ok(Some(scan_task)) => {
+                    let mut offset = 0;
+                    while offset < scan_task.rd {
+                        let piece_index = (scan_task.offset + offset) / PIECE_SIZE_BYTES;
+                        let piece_length = min(PIECE_SIZE_BYTES, scan_task.rd - offset);
+                        let mut piece_digest = Sha256::new();
+                        piece_digest.input(&scan_task.buf[offset..offset + piece_length]);
+                        let mut piece = PayloadPiece {
+                            digest: [0u8; 32],
+                            length: piece_length,
+                        };
+                        piece_digest.result(&mut piece.digest[..]);
+                        let scan_result = ScanResult { piece_index, piece };
+                        sender.send_async(scan_result).await.map_err(other_err)?;
+                        offset += PIECE_SIZE_BYTES;
+                    }
+                }
+                Err(e) => return Err(other_err(e)),
+            };
         }
     }
+}
+
+#[derive(Debug)]
+struct ScanTask {
+    offset: usize,
+    buf: Vec<u8>,
+    rd: usize,
+}
+
+#[derive(Debug)]
+struct ScanResult {
+    piece_index: usize,
+    piece: PayloadPiece,
 }
 
 impl Default for PayloadSpec {
@@ -322,7 +402,69 @@ mod tests {
             index.payload().pieces()[1].digest(),
             hex!("ca33403cfcb21bae20f21507475a3525c7f4bd36bb2a7074891e3307c5fd47d5")
         );
+    }
 
-        println!("{:?}", index);
+    #[tokio::test]
+    async fn empty_file_index() {
+        let tempf = temp_file(b'.', 0);
+
+        let index = Index::from_file(tempf.path().into())
+            .await
+            .expect("Index::from_file");
+
+        assert_eq!(
+            index.root().to_owned(),
+            tempf.path().parent().unwrap().to_owned()
+        );
+
+        // Index files
+        assert_eq!(index.files().len(), 1);
+        assert_eq!(
+            index.files()[0].path().to_owned(),
+            tempf.path().file_name().unwrap().to_owned()
+        );
+        assert_eq!(
+            index.files()[0].contents(),
+            PayloadSlice {
+                piece_offset: 0,
+                starting_piece: 0,
+                length: 0,
+            }
+        );
+        assert_eq!(index.payload().pieces().len(), 0);
+        assert_eq!(
+            index.payload().digest(),
+            hex!("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        );
+    }
+
+    #[tokio::test]
+    async fn large_file_index() {
+        let tempf = temp_file(b'.', 134217728);
+
+        let index = Index::from_file(tempf.path().into())
+            .await
+            .expect("Index::from_file");
+
+        assert_eq!(
+            index.root().to_owned(),
+            tempf.path().parent().unwrap().to_owned()
+        );
+
+        // Index files
+        assert_eq!(index.files().len(), 1);
+        assert_eq!(
+            index.files()[0].path().to_owned(),
+            tempf.path().file_name().unwrap().to_owned()
+        );
+        assert_eq!(index.payload().pieces().len(), 128);
+        assert_eq!(
+            index.files()[0].contents(),
+            PayloadSlice {
+                piece_offset: 0,
+                starting_piece: 0,
+                length: 134217728,
+            }
+        );
     }
 }

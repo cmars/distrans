@@ -887,6 +887,7 @@ dependencies = [
 name = "distrans_fileindex"
 version = "0.1.2"
 dependencies = [
+ "flume",
  "hex-literal",
  "rust-crypto",
  "tempfile",
