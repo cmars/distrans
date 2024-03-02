@@ -15,7 +15,7 @@ pub use crate::error::{other_err, Error, Result};
 
 pub const BLOCK_SIZE_BYTES: usize = 32768;
 pub const PIECE_SIZE_BLOCKS: usize = 32; // 32 * 32KB blocks = 1MB
-const PIECE_SIZE_BYTES: usize = PIECE_SIZE_BLOCKS * BLOCK_SIZE_BYTES;
+pub const PIECE_SIZE_BYTES: usize = PIECE_SIZE_BLOCKS * BLOCK_SIZE_BYTES;
 const INDEX_BUFFER_SIZE: usize = 67108864; // 64MB
 
 #[derive(Debug, PartialEq, Clone)]

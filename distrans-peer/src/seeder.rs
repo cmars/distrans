@@ -4,7 +4,7 @@ use flume::Receiver;
 use path_absolutize::*;
 use tokio::{fs::File, io::{AsyncReadExt, AsyncSeekExt}, select};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 use veilid_core::{
     CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, DHTSchemaDFLT, KeyPair, RoutingContext, ValueData, VeilidAPIError, VeilidUpdate
 };
@@ -22,6 +22,7 @@ pub struct Seeder {
 }
 
 impl Seeder {
+    #[instrument(skip(routing_context), level = "debug", err)]
     pub async fn from_file(routing_context: RoutingContext, file: &str) -> Result<Seeder> {
         // Derive root directory
         let file_path_buf: PathBuf = PathBuf::try_from(file).map_err(other_err)?;
@@ -62,6 +63,7 @@ impl Seeder {
         Ok(seeder)
     }
 
+    #[instrument(skip(routing_context, header), level = "trace", err)]
     async fn open_or_create_dht_record(
         routing_context: &RoutingContext,
         header: &Header,
@@ -93,6 +95,7 @@ impl Seeder {
         Ok(dht_rec)
     }
 
+    #[instrument(skip(self, index_bytes), level = "trace", err)]
     async fn announce(&self, index_bytes: &[u8]) -> Result<()> {
         // Writing the header last, ensures we have a complete index written before "announcing".
         self.write_index_bytes(index_bytes).await?;
@@ -148,7 +151,9 @@ impl Seeder {
                         Ok(update) => update,
                         Err(e) => return Err(other_err(e)),
                     };
-                    self.handle_update(&mut fh, &mut buf, update).await?;
+                    if let Err(e) = self.handle_update(&mut fh, &mut buf, update).await {
+                        warn!(err = format!("{:?}", e), "failed to handle update");
+                    };
                 }
                 _ = cancel.cancelled() => {
                     info!("seeding cancelled");
@@ -185,7 +190,7 @@ impl Seeder {
             }
             VeilidUpdate::RouteChange(_) => {
                 let (route_id, route_data) = self.routing_context.api().new_private_route().await?;
-                info!(route_id = format!("{}", route_id), "route changed");
+                debug!(route_id = format!("{}", route_id), "route changed");
                 self.header = self.header.with_route_data(route_data);
                 self.write_header().await?;
                 Ok(())

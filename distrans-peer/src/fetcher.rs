@@ -1,14 +1,13 @@
 use std::cmp::min;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
+use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS, PIECE_SIZE_BYTES};
 use flume::{unbounded, Receiver, Sender};
 use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, warn, Level};
@@ -21,12 +20,22 @@ use crate::{other_err, Error, Result};
 
 const N_FETCHERS: u8 = 20;
 
-#[derive(Clone)]
 pub struct Fetcher {
     routing_context: RoutingContext,
     header: Arc<Mutex<Header>>,
     index: Index,
     dht_key: CryptoTyped<CryptoKey>,
+}
+
+impl Clone for Fetcher {
+    fn clone(&self) -> Self {
+        Self {
+            routing_context: self.routing_context.clone(),
+            header: Arc::clone(&self.header),
+            index: self.index.clone(),
+            dht_key: self.dht_key.clone(),
+        }
+    }
 }
 
 impl Fetcher {
@@ -130,6 +139,10 @@ impl Fetcher {
         result
     }
 
+    fn route_data(&self) -> Vec<u8> {
+        self.header.lock().unwrap().route_data().to_vec()
+    }
+
     async fn fetch_blocks(
         mut self,
         cancel: CancellationToken,
@@ -138,11 +151,12 @@ impl Fetcher {
         task_id: u8,
     ) -> Result<()> {
         let mut fh_map: HashMap<usize, File> = HashMap::new();
-        let route_data = async { self.header.as_ref().lock().await.route_data().to_vec() }.await;
-        let target = self
-            .routing_context
-            .api()
-            .import_remote_private_route(route_data.to_vec())?;
+        let route_data = self.route_data();
+        let mut peer_target = Target::PrivateRoute(
+            self.routing_context
+                .api()
+                .import_remote_private_route(route_data)?,
+        );
         let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {
@@ -166,11 +180,21 @@ impl Fetcher {
                                 fh_map.get_mut(&fetch.file_index).unwrap()
                             }
                         };
-                        let mut block = self.request_block(
-                            Target::PrivateRoute(target.to_owned()),
+
+                        let seek_fut = fh.seek(SeekFrom::Start(fetch.block_offset() as u64));
+                        let mut block = match self.request_block(
+                            peer_target.clone(),
                             fetch.piece_index,
                             fetch.block_index,
-                        ).await?;
+                        ).await {
+                            Err(Error::RouteChanged{ target }) => {
+                                peer_target = target.clone();
+                                Err(Error::RouteChanged { target })
+                            }
+                            result => result,
+                        }?;
+                        seek_fut.await?;
+
                         let block_end = min(block.len(), BLOCK_SIZE_BYTES);
                         fh.write_all(block[fetch.piece_offset..block_end].as_mut()).await?;
                         // TODO: update piece completion; we could verify
@@ -213,18 +237,28 @@ impl Fetcher {
             Ok(resp_bytes) => Ok(resp_bytes),
             Err(VeilidAPIError::InvalidTarget { message }) => {
                 warn!(message, "refreshing route");
-                self.refresh_route().await?;
-                Err(Error::VeilidAPI(VeilidAPIError::InvalidTarget { message }))
+                let target = self.refresh_route().await?;
+                Err(Error::RouteChanged { target })
             }
             Err(e) => Err(Error::VeilidAPI(e)),
         }
     }
 
-    #[instrument(skip(self), level = Level::DEBUG, err)]
-    async fn refresh_route(&mut self) -> Result<()> {
-        let mut header = self.header.lock().await;
-        *header = Self::read_header(&self.routing_context, &self.dht_key).await?;
-        Ok(())
+    #[instrument(skip(self), level = "trace", err)]
+    async fn refresh_route(&mut self) -> Result<Target> {
+        let new_header = Self::read_header(&self.routing_context, &self.dht_key).await?;
+        let target = self
+            .routing_context
+            .api()
+            .import_remote_private_route(new_header.route_data().to_vec())?;
+        self.set_header(new_header);
+        Ok(Target::PrivateRoute(target))
+    }
+
+    fn set_header(&mut self, header: Header) {
+        debug!(route_data = hex::encode(header.route_data()), "set_header");
+        let mut header_guard = self.header.lock().unwrap();
+        *header_guard = header;
     }
 
     async fn enqueue_blocks(
@@ -268,4 +302,12 @@ struct FileBlockFetch {
     piece_index: usize,
     piece_offset: usize,
     block_index: usize,
+}
+
+impl FileBlockFetch {
+    fn block_offset(&self) -> usize {
+        (self.piece_index * PIECE_SIZE_BYTES)
+            + self.piece_offset
+            + (self.block_index * BLOCK_SIZE_BYTES)
+    }
 }

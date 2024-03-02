@@ -903,6 +903,7 @@ dependencies = [
  "capnpc",
  "distrans_fileindex",
  "flume",
+ "hex",
  "path-absolutize",
  "tempfile",
  "thiserror",
