@@ -11,7 +11,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn, Level};
 use veilid_core::{
     CryptoKey, CryptoTyped, FromStr, RoutingContext, Target, TypedKey, VeilidAPIError,
 };
@@ -100,7 +100,12 @@ impl Fetcher {
         let mut tasks = JoinSet::new();
         tasks.spawn(Self::enqueue_blocks(cancel.clone(), sender.clone(), index));
         for i in 0..N_FETCHERS {
-            tasks.spawn(self.clone().fetch_blocks(cancel.clone(), sender.clone(), receiver.clone(), i));
+            tasks.spawn(self.clone().fetch_blocks(
+                cancel.clone(),
+                sender.clone(),
+                receiver.clone(),
+                i,
+            ));
         }
         let mut result = Ok(());
         while let Some(join_res) = tasks.join_next().await {
@@ -133,10 +138,11 @@ impl Fetcher {
         task_id: u8,
     ) -> Result<()> {
         let mut fh_map: HashMap<usize, File> = HashMap::new();
-        let route_data = async { 
-            self.header.as_ref().lock().await.route_data().to_vec()
-        }.await;
-        let target = self.routing_context.api().import_remote_private_route(route_data.to_vec())?;
+        let route_data = async { self.header.as_ref().lock().await.route_data().to_vec() }.await;
+        let target = self
+            .routing_context
+            .api()
+            .import_remote_private_route(route_data.to_vec())?;
         let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {
@@ -214,6 +220,7 @@ impl Fetcher {
         }
     }
 
+    #[instrument(skip(self), level = Level::DEBUG, err)]
     async fn refresh_route(&mut self) -> Result<()> {
         let mut header = self.header.lock().await;
         *header = Self::read_header(&self.routing_context, &self.dht_key).await?;
