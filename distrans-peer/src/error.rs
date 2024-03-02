@@ -1,6 +1,6 @@
 use std::{array::TryFromSliceError, io, num::TryFromIntError};
 
-use veilid_core::VeilidAPIError;
+use veilid_core::{Target, VeilidAPIError};
 
 use crate::proto;
 
@@ -24,6 +24,8 @@ pub enum Error {
     NotReady,
     #[error("other: {0}")]
     Other(String),
+    #[error("route changed")]
+    RouteChanged{target: Target},
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -843,6 +843,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
 name = "dirs-sys"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -859,12 +868,14 @@ name = "distrans"
 version = "0.1.2"
 dependencies = [
  "clap",
- "distrans_fileindex 0.1.1",
- "distrans_peer 0.1.1",
+ "dirs",
+ "distrans_fileindex",
+ "distrans_peer",
  "flume",
  "futures",
  "metrics",
  "metrics-exporter-prometheus",
+ "rust-crypto",
  "tokio",
  "tokio-util",
  "tracing",
@@ -874,19 +885,9 @@ dependencies = [
 
 [[package]]
 name = "distrans_fileindex"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d44a4f6104bc047c9fc66e15e1d67524bb49746e48c12ae14ba32d746952828"
-dependencies = [
- "rust-crypto",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "distrans_fileindex"
 version = "0.1.2"
 dependencies = [
+ "flume",
  "hex-literal",
  "rust-crypto",
  "tempfile",
@@ -896,30 +897,13 @@ dependencies = [
 
 [[package]]
 name = "distrans_peer"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e89501f6370da9332f498caa4fafd1373fcb3e00ec27ef4d6a520a5c70a5778"
-dependencies = [
- "capnp",
- "capnpc",
- "distrans_fileindex 0.1.1",
- "flume",
- "path-absolutize",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
- "veilid-core",
-]
-
-[[package]]
-name = "distrans_peer"
 version = "0.1.2"
 dependencies = [
  "capnp",
  "capnpc",
- "distrans_fileindex 0.1.1",
+ "distrans_fileindex",
  "flume",
+ "hex",
  "path-absolutize",
  "tempfile",
  "thiserror",

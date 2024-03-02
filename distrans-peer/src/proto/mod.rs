@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod distrans_capnp;
 
 use std::{array::TryFromSliceError, num::TryFromIntError, path::PathBuf, str::Utf8Error};
