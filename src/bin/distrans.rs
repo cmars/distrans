@@ -30,8 +30,11 @@ impl Cli {
             return Ok(s.to_owned());
         }
         match self.commands {
-            Commands::Get { ref dht_key, ref root } => self.state_dir_for(format!("{}:{}", dht_key, root)),
-            Commands::Post { ref file } => self.state_dir_for(file.to_owned()),
+            Commands::Get {
+                ref dht_key,
+                ref root,
+            } => self.state_dir_for(format!("get:{}:{}", dht_key, root)),
+            Commands::Post { ref file } => self.state_dir_for(format!("post:{}", file.to_owned())),
         }
     }
 
@@ -40,8 +43,9 @@ impl Cli {
         key_digest.input(&key.as_bytes());
         let dir_name = key_digest.result_str();
         let data_dir =
-            dirs::data_dir().ok_or(Error::Other("cannot resolve data dir".to_string()))?;
+            dirs::state_dir().ok_or(Error::Other("cannot resolve state dir".to_string()))?;
         let state_dir = data_dir
+            .join("distrans")
             .join(dir_name)
             .into_os_string()
             .into_string()
