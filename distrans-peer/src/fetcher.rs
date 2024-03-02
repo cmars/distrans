@@ -1,24 +1,30 @@
 use std::cmp::min;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
 use flume::{unbounded, Receiver, Sender};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
-use veilid_core::{CryptoKey, CryptoTyped, FromStr, RoutingContext, Target, TypedKey};
+use veilid_core::{
+    CryptoKey, CryptoTyped, FromStr, RoutingContext, Target, TypedKey, VeilidAPIError,
+};
 
 use crate::proto::{decode_header, decode_index, encode_block_request, BlockRequest, Header};
 use crate::{other_err, Error, Result};
 
+const N_FETCHERS: u8 = 20;
+
 #[derive(Clone)]
 pub struct Fetcher {
     routing_context: RoutingContext,
-    header: Header,
+    header: Arc<Mutex<Header>>,
     index: Index,
     dht_key: CryptoTyped<CryptoKey>,
 }
@@ -43,7 +49,7 @@ impl Fetcher {
 
         Ok(Fetcher {
             routing_context,
-            header,
+            header: Arc::new(Mutex::new(header)),
             index,
             dht_key,
         })
@@ -93,7 +99,9 @@ impl Fetcher {
         let index = self.index.clone();
         let mut tasks = JoinSet::new();
         tasks.spawn(Self::enqueue_blocks(cancel.clone(), sender.clone(), index));
-        tasks.spawn(self.clone().fetch_blocks(cancel.clone(), sender, receiver));
+        for i in 0..N_FETCHERS {
+            tasks.spawn(self.clone().fetch_blocks(cancel.clone(), sender.clone(), receiver.clone(), i));
+        }
         let mut result = Ok(());
         while let Some(join_res) = tasks.join_next().await {
             match join_res {
@@ -118,16 +126,17 @@ impl Fetcher {
     }
 
     async fn fetch_blocks(
-        self,
+        mut self,
         cancel: CancellationToken,
         sender: Sender<FileBlockFetch>,
         receiver: Receiver<FileBlockFetch>,
+        task_id: u8,
     ) -> Result<()> {
         let mut fh_map: HashMap<usize, File> = HashMap::new();
-        let target = self
-            .routing_context
-            .api()
-            .import_remote_private_route(self.header.route_data().to_vec())?;
+        let route_data = async { 
+            self.header.as_ref().lock().await.route_data().to_vec()
+        }.await;
+        let target = self.routing_context.api().import_remote_private_route(route_data.to_vec())?;
         let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {
@@ -135,14 +144,12 @@ impl Fetcher {
                     let fetch = match recv_fetch {
                         Ok(fetch) => fetch,
                         Err(e) => {
-                            // See https://docs.rs/flume/latest/flume/struct.Receiver.html#method.recv_async
-                            // An error here means "channel is closed" effectively. Makes me miss Go.
                             // This is practically impossible given we have a sender in scope here for retries...
                             debug!(err = format!("{}", e), "all senders have been dropped");
                             return Ok(())
                         }
                     };
-                    debug!(fetch = format!("{:?}", fetch));
+                    debug!(task_id, fetch = format!("{:?}", fetch));
                     let fetch_result: Result<()> = async {
                         let fh = match fh_map.get_mut(&fetch.file_index) {
                             Some(fh) => fh,
@@ -184,17 +191,33 @@ impl Fetcher {
         }
     }
 
-    async fn request_block(&self, target: Target, piece: usize, block: usize) -> Result<Vec<u8>> {
+    async fn request_block(
+        &mut self,
+        target: Target,
+        piece: usize,
+        block: usize,
+    ) -> Result<Vec<u8>> {
         let block_req = BlockRequest {
             piece: piece as u32,
             block: block as u8,
         };
         let block_req_bytes = encode_block_request(&block_req)?;
-        let resp_bytes = self
-            .routing_context
-            .app_call(target, block_req_bytes)
-            .await?;
-        Ok(resp_bytes)
+        let result = self.routing_context.app_call(target, block_req_bytes).await;
+        match result {
+            Ok(resp_bytes) => Ok(resp_bytes),
+            Err(VeilidAPIError::InvalidTarget { message }) => {
+                warn!(message, "refreshing route");
+                self.refresh_route().await?;
+                Err(Error::VeilidAPI(VeilidAPIError::InvalidTarget { message }))
+            }
+            Err(e) => Err(Error::VeilidAPI(e)),
+        }
+    }
+
+    async fn refresh_route(&mut self) -> Result<()> {
+        let mut header = self.header.lock().await;
+        *header = Self::read_header(&self.routing_context, &self.dht_key).await?;
+        Ok(())
     }
 
     async fn enqueue_blocks(

@@ -6,7 +6,7 @@ use std::{
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use flume::{unbounded, Receiver, Sender};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::{fs::File, task::JoinSet};
 
 mod error;
@@ -205,7 +205,7 @@ impl PayloadSpec {
     }
 
     pub async fn from_file(file: impl AsRef<Path>) -> Result<PayloadSpec> {
-        let mut fh = File::open(file).await?;
+        let mut fh = File::open(file.as_ref()).await?;
         let file_meta = fh.metadata().await?;
         let mut payload = PayloadSpec::default();
 
@@ -223,30 +223,36 @@ impl PayloadSpec {
             scanners.spawn(Self::scan(task_receiver.clone(), result_sender.clone()));
         }
 
-        let mut payload_digest = Sha256::new();
         for scan_index in 0..n_tasks {
-            let mut scan = ScanTask {
+            let scan_task = ScanTask {
                 offset: scan_index * INDEX_BUFFER_SIZE,
-                buf: vec![0u8; INDEX_BUFFER_SIZE],
-                rd: 0,
+                fh: File::open(file.as_ref()).await?,
             };
+            task_sender
+                .send_async(Some(scan_task))
+                .await
+                .map_err(other_err)?;
+        }
+
+        let mut buf = vec![0; INDEX_BUFFER_SIZE];
+        let mut payload_digest = Sha256::new();
+        loop {
             let mut total_rd = 0;
             while total_rd < INDEX_BUFFER_SIZE {
-                let rd = fh.read(&mut scan.buf[total_rd..INDEX_BUFFER_SIZE]).await?;
+                let rd = fh.read(&mut buf[total_rd..INDEX_BUFFER_SIZE]).await?;
                 if rd == 0 {
                     break;
                 }
                 total_rd += rd;
             }
-            scan.rd = total_rd;
-            if scan.rd > 0 {
-                payload_digest.input(&scan.buf[..scan.rd]);
-                task_sender
-                    .send_async(Some(scan))
-                    .await
-                    .map_err(other_err)?;
+            if total_rd == 0 {
+                break;
             }
+            payload_digest.input(&buf[..total_rd]);
         }
+        drop(buf);
+        payload_digest.result(&mut payload.digest);
+
         loop {
             task_sender.send_async(None).await.map_err(other_err)?;
             match scanners.join_next().await {
@@ -265,7 +271,7 @@ impl PayloadSpec {
             payload.length = (payload.pieces.len() - 1) * PIECE_SIZE_BYTES;
             payload.length += payload.pieces[payload.pieces.len() - 1].length;
         }
-        payload_digest.result(&mut payload.digest[..]);
+        //payload_digest.result(&mut payload.digest[..]);
         Ok(payload)
     }
 
@@ -273,13 +279,35 @@ impl PayloadSpec {
         loop {
             match receiver.recv_async().await {
                 Ok(None) => return Ok(()),
-                Ok(Some(scan_task)) => {
+                Ok(Some(mut scan_task)) => {
+                    scan_task
+                        .fh
+                        .seek(std::io::SeekFrom::Start(
+                            scan_task.offset.try_into().map_err(other_err)?,
+                        ))
+                        .await?;
+                    let mut total_rd = 0;
+                    let mut buf = vec![0u8; INDEX_BUFFER_SIZE];
+                    while total_rd < INDEX_BUFFER_SIZE {
+                        let rd = scan_task
+                            .fh
+                            .read(&mut buf[total_rd..INDEX_BUFFER_SIZE])
+                            .await?;
+                        if rd == 0 {
+                            break;
+                        }
+                        total_rd += rd;
+                    }
+                    if total_rd == 0 {
+                        return Ok(());
+                    }
+
                     let mut offset = 0;
-                    while offset < scan_task.rd {
+                    while offset < total_rd {
                         let piece_index = (scan_task.offset + offset) / PIECE_SIZE_BYTES;
-                        let piece_length = min(PIECE_SIZE_BYTES, scan_task.rd - offset);
+                        let piece_length = min(PIECE_SIZE_BYTES, total_rd - offset);
                         let mut piece_digest = Sha256::new();
-                        piece_digest.input(&scan_task.buf[offset..offset + piece_length]);
+                        piece_digest.input(&buf[offset..offset + piece_length]);
                         let mut piece = PayloadPiece {
                             digest: [0u8; 32],
                             length: piece_length,
@@ -299,8 +327,7 @@ impl PayloadSpec {
 #[derive(Debug)]
 struct ScanTask {
     offset: usize,
-    buf: Vec<u8>,
-    rd: usize,
+    fh: File,
 }
 
 #[derive(Debug)]

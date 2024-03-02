@@ -56,12 +56,14 @@ name = "stress"
 
 [dependencies]
 clap = {version = "4.4", features = ["derive", "env"]}
-distrans_fileindex = "0.1"
-distrans_peer = "0.1"
+dirs = "5.0"
+distrans_fileindex = { version = "0.1", path = "distrans-fileindex" }
+distrans_peer = { version = "0.1", path = "distrans-peer" }
 flume = "0.11"
 futures = "0.3"
 metrics = "0.22"
 metrics-exporter-prometheus = { version = "0.13.0", features = ["http-listener"] }
+rust-crypto = "0.2"
 tokio = "1.33"
 tokio-util = "0.7"
 tracing = { version = "0.1", features = ["log", "attributes"] }

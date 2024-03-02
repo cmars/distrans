@@ -4,23 +4,51 @@ use std::{
 };
 
 use clap::{arg, Parser, Subcommand};
+use crypto::{digest::Digest, sha2::Sha256};
 use flume::{unbounded, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, trace, warn};
-
-use distrans_peer::{veilid_config, Error, Fetcher, Result, Seeder};
+use tracing::{debug, info, trace, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use veilid_core::{RoutingContext, Sequencing, VeilidUpdate};
+
+use distrans_peer::{other_err, veilid_config, Error, Fetcher, Result, Seeder};
 
 #[derive(Parser, Debug)]
 #[command(name = "distrans")]
 #[command(bin_name = "distrans")]
 struct Cli {
     #[arg(long, env)]
-    pub state_dir: String,
+    pub state_dir: Option<String>,
 
     #[command(subcommand)]
     pub commands: Commands,
+}
+
+impl Cli {
+    fn state_dir(&self) -> Result<String> {
+        if let Some(s) = &self.state_dir {
+            return Ok(s.to_owned());
+        }
+        match self.commands {
+            Commands::Get { ref dht_key, ref root } => self.state_dir_for(format!("{}:{}", dht_key, root)),
+            Commands::Post { ref file } => self.state_dir_for(file.to_owned()),
+        }
+    }
+
+    fn state_dir_for(&self, key: String) -> Result<String> {
+        let mut key_digest = Sha256::new();
+        key_digest.input(&key.as_bytes());
+        let dir_name = key_digest.result_str();
+        let data_dir =
+            dirs::data_dir().ok_or(Error::Other("cannot resolve data dir".to_string()))?;
+        let state_dir = data_dir
+            .join(dir_name)
+            .into_os_string()
+            .into_string()
+            .map_err(|os| other_err(format!("{:?}", os)))?;
+        debug!(state_dir);
+        Ok(state_dir)
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -53,7 +81,7 @@ async fn main() {
 
 async fn run(cli: Cli) -> Result<()> {
     let (routing_context, updates) =
-        new_routing_context(PathBuf::from(cli.state_dir).as_path()).await?;
+        new_routing_context(PathBuf::from(cli.state_dir()?).as_path()).await?;
     wait_for_network(&updates).await?;
 
     let cancel = CancellationToken::new();
