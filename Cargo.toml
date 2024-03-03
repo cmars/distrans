@@ -31,6 +31,10 @@ hosting = ["github"]
 # Allow dirty necessary as we've had to customize the action
 allow-dirty = ["ci"]
 
+[workspace.metadata.release]
+shared-version = true
+tag-name = "v{{version}}"
+
 [package]
 name = "distrans"
 description = "Anonymous decentralized file distribution and transfer"

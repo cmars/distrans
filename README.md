@@ -1,35 +1,43 @@
 # distrans
 
+![Crates.io Version](https://img.shields.io/crates/v/distrans)
+
 "The bytes must flow."
+
+Distrans (distribution and transfer) sends and receives file content anonymously over the [Veilid](https://veilid.com) network.
 
 # Usage
 
-`distrans get <dht key> [directory]` to download a posted file (defaults to current directory).
+`distrans post <file>` indexes and seeds a file, displaying the dht key where it can be downloaded.
 
-`distrans post <file>` will serve a file, displaying the dht key where it can be downloaded.
+`distrans get <dht key> [directory]` downloads a posted file (defaults to current directory).
 
-# TODOs
+# Roadmap
 
-## What is currently broken?
+See [project plans](https://github.com/users/cmars/projects/1/views/1) for short-term plans and contribution ideas.
 
-To distribute a large 4GB Linux ISO effectively point-to-point, these need to be addressed:
-
-- [ ] File indexing is slow, need to improve performance of the seeding scan on large files.
-- [ ] Fetcher doesn't yet renegotiate a new private route if/when it drops.
-- [ ] Fetcher could run with a much higher rate of concurrency. Stress testing indicates Veilid will tolerate up to 20 fetchers.
-- [ ] Verification of piece digests
-- [ ] Resuming fetch where we left off, keeping track of state
-
-# And then?
-
-Full duplex peer downloading and uploading.
-
-Trackers and swarms.
+Long-term: Full duplex peer downloading and uploading. Trackers and swarms.
 
 # Development
 
-Currently only NixOS is supported. Cross-platform binaries and OCI images will come later.
+Currently distrans builds against veilid-core 0.2.5, which at time of writing, does not build without serde tooling installed. Specific versions of capnproto and protobuf are required. First set up a [development environment for Veilid](https://gitlab.com/veilid/veilid/-/blob/main/DEVELOPMENT.md#veilid-development) on your platform of choice (Android / Flutter stuff not required).
 
-`nix develop` to get a devshell, then
+Then `cargo install distrans` and other `cargo` commands should work.
 
-`cargo build`
+## NixOS
+
+The original author of this project develops on NixOS. If you Nix too,
+
+`nix develop` in here to get a devshell, then
+
+`cargo build` and other `cargo` commands to do things.
+
+## CICD
+
+Github is used for CICD and especially [release automation](https://blog.orhun.dev/automated-rust-releases/).
+
+## Contributions
+
+Branches and releases are regularly mirrored to [Gitlab](https://gitlab.com/cmars/distrans). Pull requests might be accepted from either, if they fit with the project plans and goals.
+
+Open an issue and ask before picking up a branch and proposing, for best results.
