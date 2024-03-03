@@ -865,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "distrans"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "clap",
  "dirs",
@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "distrans_fileindex"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "flume",
  "hex-literal",
@@ -897,7 +897,7 @@ dependencies = [
 
 [[package]]
 name = "distrans_peer"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "capnp",
  "capnpc",
