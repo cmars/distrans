@@ -20,7 +20,7 @@ Long-term: Full duplex peer downloading and uploading. Trackers and swarms.
 
 # Development
 
-Currently distrans builds against veilid-core 0.2.5, which at time of writing, does not build without serde tooling installed. Specific versions of capnproto and protobuf are required. First set up a [development environment for Veilid](https://gitlab.com/veilid/veilid/-/blob/main/DEVELOPMENT.md#veilid-development) on your platform of choice (Android / Flutter stuff not required).
+Currently distrans builds against veilid-core 0.2.5, which at time of writing does not build without serde tooling installed. Specific versions of capnproto and protobuf are required. First set up a [development environment for Veilid](https://gitlab.com/veilid/veilid/-/blob/main/DEVELOPMENT.md#veilid-development) on your platform of choice (Android / Flutter stuff not required).
 
 Then `cargo install distrans` and other `cargo` commands should work.
 
@@ -38,6 +38,6 @@ Github is used for CICD and especially [release automation](https://blog.orhun.d
 
 ## Contributions
 
-Branches and releases are regularly mirrored to [Gitlab](https://gitlab.com/cmars/distrans). Pull requests might be accepted from either, if they fit with the project plans and goals.
+Branches and releases are regularly mirrored to [Gitlab](https://gitlab.com/cmars232/distrans). Pull requests might be accepted from either, if they fit with the project plans and goals.
 
 Open an issue and ask before picking up a branch and proposing, for best results.
