@@ -4,8 +4,8 @@ use std::{
 };
 
 use clap::{arg, Parser, Subcommand};
-use crypto::{digest::Digest, sha2::Sha256};
 use flume::{unbounded, Receiver, Sender};
+use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -40,8 +40,9 @@ impl Cli {
 
     fn state_dir_for(&self, key: String) -> Result<String> {
         let mut key_digest = Sha256::new();
-        key_digest.input(&key.as_bytes());
-        let dir_name = key_digest.result_str();
+        key_digest.update(&key.as_bytes());
+        let key_digest_bytes: [u8; 32] = key_digest.finalize().into();
+        let dir_name = hex::encode(key_digest_bytes);
         let data_dir =
             dirs::state_dir().ok_or(Error::Other("cannot resolve state dir".to_string()))?;
         let state_dir = data_dir

@@ -3,9 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crypto::digest::Digest;
-use crypto::sha2::Sha256;
 use flume::{unbounded, Receiver, Sender};
+use sha2::{Sha256, Digest};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::{fs::File, task::JoinSet};
 
@@ -248,10 +247,10 @@ impl PayloadSpec {
             if total_rd == 0 {
                 break;
             }
-            payload_digest.input(&buf[..total_rd]);
+            payload_digest.update(&buf[..total_rd]);
         }
         drop(buf);
-        payload_digest.result(&mut payload.digest);
+        payload.digest = payload_digest.finalize().into();
 
         loop {
             task_sender.send_async(None).await.map_err(other_err)?;
@@ -307,12 +306,12 @@ impl PayloadSpec {
                         let piece_index = (scan_task.offset + offset) / PIECE_SIZE_BYTES;
                         let piece_length = min(PIECE_SIZE_BYTES, total_rd - offset);
                         let mut piece_digest = Sha256::new();
-                        piece_digest.input(&buf[offset..offset + piece_length]);
+                        piece_digest.update(&buf[offset..offset + piece_length]);
                         let mut piece = PayloadPiece {
                             digest: [0u8; 32],
                             length: piece_length,
                         };
-                        piece_digest.result(&mut piece.digest[..]);
+                        piece.digest = piece_digest.finalize().into();
                         let scan_result = ScanResult { piece_index, piece };
                         sender.send_async(scan_result).await.map_err(other_err)?;
                         offset += PIECE_SIZE_BYTES;

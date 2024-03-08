@@ -35,6 +35,10 @@ allow-dirty = ["ci"]
 shared-version = true
 tag-name = "v{{version}}"
 
+[workspace.dependencies]
+sha2 = { version = "0.10", features = ["asm"] }
+tokio = { version = "1.36", features = ["full"] }
+
 [package]
 name = "distrans"
 description = "Anonymous decentralized file distribution and transfer"
@@ -65,14 +69,20 @@ distrans_fileindex = { version = "0", path = "distrans-fileindex" }
 distrans_peer = { version = "0", path = "distrans-peer" }
 flume = "0.11"
 futures = "0.3"
+hex = "0.4"
 metrics = "0.22"
 metrics-exporter-prometheus = { version = "0.13", features = ["http-listener"] }
-rust-crypto = "0.2"
-tokio = "1.33"
+tokio = { workspace = true }
 tokio-util = "0.7"
 tracing = { version = "0.1", features = ["log", "attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 veilid-core = "0.2.5"
+
+[target.'cfg(unix)'.dependencies]
+sha2 = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+sha2 = "0.10"
 
 [profile.release]
 strip = true
