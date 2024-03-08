@@ -9,11 +9,20 @@ version.workspace = true
 description = "Distrans file indexing"
 documentation = "https://docs.rs/distrans_fileindex"
 
+[lib]
+name = "distrans_fileindex"
+path = "src/lib.rs"
+
 [dependencies]
 flume = "0.11"
-rust-crypto = "0.2"
 thiserror = "1.0"
-tokio = { version = "1.33", features = ["fs", "io-util", "macros", "rt"] }
+tokio = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+sha2 = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+sha2 = "0.10"
 
 [dev-dependencies]
 hex-literal = "0.4"
