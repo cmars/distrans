@@ -906,6 +906,7 @@ dependencies = [
  "flume",
  "hex",
  "path-absolutize",
+ "sha2 0.10.8",
  "tempfile",
  "thiserror",
  "tokio",

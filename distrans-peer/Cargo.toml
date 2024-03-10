@@ -26,6 +26,12 @@ tokio-util = "0.7"
 tracing = { version = "0.1", features = ["log", "attributes"] }
 veilid-core = "0.2.5"
 
+[target.'cfg(unix)'.dependencies]
+sha2 = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+sha2 = "0.10"
+
 [build-dependencies]
 capnpc = "0.18"
 
