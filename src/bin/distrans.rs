@@ -102,24 +102,24 @@ async fn run(cli: Cli) -> Result<()> {
         }
     });
 
-    match cli.commands {
+    let result = match cli.commands {
         Commands::Get { dht_key, root } => {
             let fetcher =
                 Fetcher::from_dht(routing_context.clone(), dht_key.as_str(), root.as_str()).await?;
-            fetcher.fetch(cancel).await?;
+            fetcher.fetch(cancel).await
         }
         Commands::Post { file } => {
             let seeder = Seeder::from_file(routing_context.clone(), file.as_str()).await?;
-            seeder.seed(cancel, updates).await?;
+            seeder.seed(cancel, updates).await
         }
-    }
+    };
     complete_cancel.cancel();
     if let Err(e) = canceller.await {
         warn!(err = format!("{}", e), "failed to join canceller task");
     }
 
     routing_context.api().shutdown().await;
-    Ok(())
+    result
 }
 
 async fn new_routing_context(
