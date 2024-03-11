@@ -10,7 +10,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 use veilid_core::{
     CryptoKey, CryptoTyped, FromStr, RoutingContext, Target, TypedKey, VeilidAPIError,
 };
@@ -196,7 +196,7 @@ impl Fetcher {
                             }
                         };
 
-                        let seek_fut = fh.seek(SeekFrom::Start(fetch.block_offset() as u64));
+                        fh.seek(SeekFrom::Start(fetch.block_offset() as u64)).await?;
                         let mut block = match self.request_block(
                             peer_target.clone(),
                             fetch.piece_index,
@@ -208,16 +208,20 @@ impl Fetcher {
                             }
                             result => result,
                         }?;
-                        seek_fut.await?;
 
                         let block_end = min(block.len(), BLOCK_SIZE_BYTES);
                         fh.write_all(block[fetch.piece_offset..block_end].as_mut()).await?;
-                        verify_sender.send(PieceState::new(fetch.file_index, fetch.piece_index, fetch.piece_offset, fetch.block_index)).map_err(other_err)?;
+                        verify_sender.send_async(PieceState::new(
+                            fetch.file_index,
+                            fetch.piece_index,
+                            fetch.piece_offset,
+                            self.index.payload().pieces()[fetch.piece_index].block_count(),
+                            fetch.block_index)).await.map_err(other_err)?;
                         Ok(())
                     }.await;
                     if let Err(e) = fetch_result {
                         warn!(err = format!("{}", e), "fetch block failed, queued for retry");
-                        fetch_block_sender.send(fetch).map_err(other_err)?;
+                        fetch_block_sender.send_async(fetch).await.map_err(other_err)?;
                     }
                 }
                 _ = done.cancelled() => {
@@ -334,14 +338,22 @@ impl Fetcher {
                     if to_verify.is_complete() {
                         // verify complete ones
                         if self.verify_piece(to_verify.file_index, to_verify.piece_index).await? {
+                            debug!(file_index = to_verify.file_index, piece_index = to_verify.piece_index, "digest verified");
                             verified_pieces += 1;
                             if verified_pieces == self.index.payload().pieces().len() {
+                                info!("all pieces validated");
                                 done.cancel();
                                 return Ok(())
                             }
                         } else {
                             // re-queue fetch if invalid
                             warn!(file_index = to_verify.file_index, piece_index = to_verify.piece_index, "invalid digest, retrying");
+                            piece_states.insert(to_verify.key(), PieceState::empty(
+                                to_verify.file_index,
+                                to_verify.piece_index,
+                                to_verify.piece_offset,
+                                self.index.payload().pieces()[to_verify.piece_index].block_count(),
+                            ));
                             for block_index in 0..32  {
                                 fetch_block_sender.send_async(FileBlockFetch{
                                     file_index: to_verify.file_index,
@@ -402,6 +414,7 @@ struct PieceState {
     file_index: usize,
     piece_index: usize,
     piece_offset: usize,
+    block_count: usize,
     blocks: u32,
 }
 
@@ -410,13 +423,30 @@ impl PieceState {
         file_index: usize,
         piece_index: usize,
         piece_offset: usize,
+        block_count: usize,
         block_index: usize,
     ) -> PieceState {
         PieceState {
             file_index,
             piece_index,
             piece_offset,
+            block_count,
             blocks: 1 << block_index,
+        }
+    }
+
+    fn empty(
+        file_index: usize,
+        piece_index: usize,
+        piece_offset: usize,
+        block_count: usize,
+    ) -> PieceState {
+        PieceState {
+            file_index,
+            piece_index,
+            piece_offset,
+            block_count,
+            blocks: 0u32,
         }
     }
 
@@ -425,7 +455,14 @@ impl PieceState {
     }
 
     fn is_complete(&self) -> bool {
-        self.blocks == 0xffffffff
+        match self.block_count {
+            0 => true,
+            PIECE_SIZE_BLOCKS => self.blocks == 0xffffffff,
+            _ => {
+                let mask = 1 << self.block_count - 1;
+                self.blocks & mask == mask
+            }
+        }
     }
 
     fn merged(&mut self, other: PieceState) -> PieceState {

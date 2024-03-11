@@ -4,7 +4,7 @@ use std::{
 };
 
 use flume::{unbounded, Receiver, Sender};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::{fs::File, task::JoinSet};
 
@@ -366,6 +366,15 @@ impl PayloadPiece {
 
     pub fn length(&self) -> usize {
         return self.length;
+    }
+
+    pub fn block_count(&self) -> usize {
+        self.length / BLOCK_SIZE_BYTES
+            + if self.length % BLOCK_SIZE_BYTES > 0 {
+                1
+            } else {
+                0
+            }
     }
 }
 
