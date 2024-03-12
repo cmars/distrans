@@ -865,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "distrans"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "clap",
  "dirs",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "distrans_fileindex"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "flume",
  "hex-literal",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "distrans_peer"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "capnp",
  "capnpc",
@@ -2669,9 +2669,9 @@ dependencies = [
 
 [[package]]
 name = "range-set-blaze"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "551bc88f4bf63828b34bf2b3ab65037d4095aea6aa7e69b32b5f0928a2f18ec6"
+checksum = "8421b5d459262eabbe49048d362897ff3e3830b44eac6cfe341d6acb2f0f13d2"
 dependencies = [
  "gen_ops",
  "itertools",
