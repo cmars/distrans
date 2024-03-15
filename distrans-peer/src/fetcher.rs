@@ -102,6 +102,15 @@ impl Fetcher {
         )?)
     }
 
+    pub fn file(&self) -> String {
+        self.index
+            .files()
+            .iter()
+            .map(|f| f.path().to_str().unwrap_or("").to_string())
+            .collect::<Vec<String>>()
+            .join(",")
+    }
+
     pub async fn fetch(self, cancel: CancellationToken) -> Result<()> {
         let (fetch_block_sender, fetch_block_receiver) = unbounded();
         let (verify_sender, verify_receiver) = unbounded();
