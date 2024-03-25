@@ -64,6 +64,10 @@ name = "stress"
 
 [dependencies]
 clap = {version = "4.4", features = ["derive", "env"]}
+color-eyre = "0.6.2"
+cursive = { version = "0.20", default_features = false, features = ["crossterm-backend", "ansi"] }
+cursive-aligned-view = "^0"
+cursive_buffered_backend = "0.6"
 dirs = "5.0"
 distrans_fileindex = { version = "0", path = "distrans-fileindex" }
 distrans_peer = { version = "0", path = "distrans-peer" }
@@ -72,6 +76,7 @@ futures = "0.3"
 hex = "0.4"
 metrics = "0.22"
 metrics-exporter-prometheus = { version = "0.13", features = ["http-listener"] }
+qr2term = "0.3"
 tokio = { workspace = true }
 tokio-util = "0.7"
 tracing = { version = "0.1", features = ["log", "attributes"] }

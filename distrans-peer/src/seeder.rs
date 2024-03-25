@@ -63,6 +63,14 @@ impl Seeder {
         Ok(seeder)
     }
 
+    pub fn dht_key(&self) -> String {
+        self.dht_key.to_string()
+    }
+
+    pub fn digest(&self) -> String {
+        hex::encode(self.index.payload().digest())
+    }
+
     #[instrument(skip(routing_context, header), level = "trace", err)]
     async fn open_or_create_dht_record(
         routing_context: &RoutingContext,
