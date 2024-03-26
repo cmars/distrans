@@ -28,9 +28,15 @@ Then `cargo install distrans` and other `cargo` commands should work.
 
 The original author of this project develops on NixOS. If you Nix too,
 
+### Developing
+
 `nix develop` in here to get a devshell, then
 
 `cargo build` and other `cargo` commands to do things.
+
+### Running
+
+`nix run github:cmars/distrans`
 
 ## CICD
 

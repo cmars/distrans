@@ -11,9 +11,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils";
     };
+
+    crane.url = "github:ipetkov/crane";
+    crane.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay, crane }:
     (flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -46,6 +49,19 @@
           ]);
 
           LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib";
+        };
+
+        packages.default = crane.lib.${system}.buildPackage {
+          src = ./.;
+
+          buildInputs = with pkgs; [
+            cargo
+            rust-bin.stable.latest.default
+            capnproto
+            protobuf
+            pkg-config
+            openssl
+          ];
         };
       }
     ));
