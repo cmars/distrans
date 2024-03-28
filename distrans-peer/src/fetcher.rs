@@ -111,6 +111,10 @@ impl Fetcher {
             .join(",")
     }
 
+    pub fn digest(&self) -> String {
+        hex::encode(self.index.payload().digest())
+    }
+
     pub async fn fetch(self, cancel: CancellationToken) -> Result<()> {
         let (fetch_block_sender, fetch_block_receiver) = unbounded();
         let (verify_sender, verify_receiver) = unbounded();
