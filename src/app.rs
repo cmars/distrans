@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt::Display, path::PathBuf, sync::Arc, thread};
+use std::{cmp::max, collections::VecDeque, fmt::Display, path::PathBuf, sync::Arc, thread};
 
 use color_eyre::eyre::{Error, Result};
 use cursive::{
@@ -7,7 +7,7 @@ use cursive::{
     theme::{BorderStyle, Palette, Theme},
     view::{Nameable, Resizable, ScrollStrategy},
     views::{LinearLayout, Panel, ScrollView, TextView, ThemedView},
-    CursiveRunnable, Vec2, View, With,
+    CursiveRunnable, Vec2, View, With, XY,
 };
 use cursive_aligned_view::{Alignable, AlignedView};
 use distrans_peer::{veilid_config, Fetcher, Seeder};
@@ -46,6 +46,7 @@ pub enum State {
     FetchingFile {
         file: String,
         dht_key: String,
+        sha256: String,
     },
     FetchComplete,
     Stopping,
@@ -73,8 +74,8 @@ impl Display for State {
             State::ResolvingFetch { file: _, dht_key } => {
                 f.write_fmt(format_args!("resolving DHT key {} for fetch", dht_key))
             }
-            State::FetchingFile { file, dht_key } => {
-                f.write_fmt(format_args!("fetching DHT key {} into {}", dht_key, file,))
+            State::FetchingFile { file, dht_key, sha256 } => {
+                f.write_fmt(format_args!("fetching DHT key {} into {} sha256 {}", dht_key, file, sha256))
             }
             State::FetchComplete => f.write_str("fetch complete"),
             State::Stopping => f.write_str("stopping"),
@@ -136,7 +137,7 @@ impl App {
             siv.add_global_callback(Event::Refresh, move |s| {
                 while let Ok(state) = rx.try_recv() {
                     match &state {
-                        State::FetchingFile { file, dht_key } => {
+                        State::FetchingFile { file, dht_key , sha256} => {
                             s.call_on_name("mode", |view: &mut TextView| {
                                 view.set_content("Fetching")
                             });
@@ -144,6 +145,9 @@ impl App {
                                 view.set_content(dht_key)
                             });
                             s.call_on_name("file", |view: &mut TextView| view.set_content(file));
+                            s.call_on_name("sha256", |view: &mut TextView| {
+                                view.set_content(sha256)
+                            });
                         }
                         State::ResolvingFetch { file, dht_key } => {
                             s.call_on_name("mode", |view: &mut TextView| {
@@ -204,6 +208,8 @@ impl App {
                     });
                 }
             });
+
+            // Use buffered backend to prevent refresh flickering. crossterm redraws the entire screen by default.
             let backend_init = || -> std::io::Result<Box<dyn cursive::backend::Backend>> {
                 let backend = cursive::backends::crossterm::Backend::init()?;
                 let buffered_backend = cursive_buffered_backend::BufferedBackend::new(backend);
@@ -256,6 +262,7 @@ impl App {
                 tx.send_async(State::FetchingFile {
                     file: fetcher.file(),
                     dht_key: dht_key.to_owned(),
+                    sha256: fetcher.digest(),
                 })
                 .await?;
                 fetcher.fetch(cancel).await?;
@@ -426,7 +433,8 @@ impl App {
                     )
                     .child(
                         ScrollView::new(BufferView::new(10, log_rx))
-                            .show_scrollbars(true)
+                            .show_scrollbars(false)
+                            .scroll_x(true)
                             .scroll_strategy(ScrollStrategy::StickToBottom)
                             .max_height(5),
                     )
@@ -454,12 +462,22 @@ impl BufferView {
         BufferView { buffer, rx }
     }
 
-    fn update(&mut self) {
+    fn update(&mut self) -> Vec2 {
         while let Ok(line_bytes) = self.rx.try_recv() {
             let line = String::from_utf8_lossy(&line_bytes);
             self.buffer.push_back(line.into());
             self.buffer.pop_front();
         }
+
+        let mut width = 1usize;
+        let mut height = 0usize;
+        for line in self.buffer.iter() {
+            width = max(width, line.len());
+            if !line.is_empty() {
+                height += 1;
+            }
+        }
+        XY::new(width, height)
     }
 }
 
@@ -468,9 +486,8 @@ impl View for BufferView {
         self.update();
     }
 
-    fn required_size(&mut self, constraint: Vec2) -> Vec2 {
-        self.layout(constraint);
-        constraint
+    fn required_size(&mut self, _: Vec2) -> Vec2 {
+        self.update()
     }
 
     fn draw(&self, printer: &cursive::Printer) {
