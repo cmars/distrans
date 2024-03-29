@@ -121,16 +121,6 @@ jobs:
       - name: Install dependencies
         run: |
           ${{ matrix.packages_install }}
-      - name: Install capnproto & protobuf for linux
-        run: ./tools/install_ubuntu.sh
-        if: startsWith(matrix.runner, 'ubuntu')
-      - name: Install capnproto & protobuf for macos
-        run: ./tools/install_macos.sh
-        if: startsWith(matrix.runner, 'macos')
-      - name: Install capnproto & protobuf for windows
-        shell: pwsh
-        run: .\tools\install_windows.ps1
-        if: startsWith(matrix.runner, 'windows')
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
