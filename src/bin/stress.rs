@@ -1,7 +1,8 @@
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::Arc, time::Duration,
+    sync::Arc,
+    time::Duration,
 };
 
 use distrans_peer::{other_err, veilid_config, Error, Result};
@@ -11,13 +12,17 @@ use flume::{unbounded, Receiver, Sender};
 use futures::future::join_all;
 use metrics::{counter, histogram};
 use metrics_exporter_prometheus::PrometheusBuilder;
-use tokio::{select, signal, task::JoinHandle, time::{Instant, timeout}};
+use tokio::{
+    select, signal,
+    task::JoinHandle,
+    time::{timeout, Instant},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::prelude::*;
 use veilid_core::{
-    DHTRecordDescriptor, DHTSchemaDFLT, FromStr, KeyPair, RouteId, RoutingContext, Sequencing,
+    DHTRecordDescriptor, FromStr, KeyPair, RouteId, RoutingContext, Sequencing,
     Target, TypedKey, VeilidUpdate,
 };
 
@@ -180,7 +185,7 @@ impl App {
         let (route_id, route_data) = self.routing_context.api().new_private_route().await?;
         self.route_id = Some(route_id);
         self.routing_context
-            .set_dht_value(dht_key, 0, route_data)
+            .set_dht_value(dht_key, 0, route_data, None)
             .await?;
         Ok(())
     }
@@ -198,10 +203,7 @@ impl App {
         }
         let dht_rec = self
             .routing_context
-            .create_dht_record(
-                veilid_core::DHTSchema::DFLT(DHTSchemaDFLT { o_cnt: 1 }),
-                None,
-            )
+            .create_dht_record(veilid_core::DHTSchema::dflt(1)?, None)
             .await?;
         let dht_owner = KeyPair::new(
             dht_rec.owner().to_owned(),
@@ -292,7 +294,9 @@ impl App {
                             caller
                                 .routing_context
                                 .app_call(Target::PrivateRoute(rid), msg),
-                        ).await.map_err(other_err)??;
+                        )
+                        .await
+                        .map_err(other_err)??;
                         let delta = t0.elapsed();
                         debug!(sent = msg_len, received = resp.len());
                         counter!("bytes_sent").increment(msg_len as u64);

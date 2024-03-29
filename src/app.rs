@@ -123,6 +123,7 @@ impl App {
     async fn run_ui(&mut self, tx: Sender<State>, rx: Receiver<State>) -> Result<()> {
         let cancel = CancellationToken::new();
         let quit_cancel = cancel.clone();
+        let poll_cancel = cancel.clone();
         let (log_tx, log_rx) = unbounded();
         initialize_ui_logging(log_tx);
         let ui_handle = thread::spawn(move || {
@@ -135,6 +136,9 @@ impl App {
             });
             Self::add_panel(&mut siv, log_rx);
             siv.add_global_callback(Event::Refresh, move |s| {
+                if poll_cancel.is_cancelled() {
+                    s.quit();
+                }
                 while let Ok(state) = rx.try_recv() {
                     match &state {
                         State::FetchingFile { file, dht_key , sha256} => {
@@ -218,7 +222,8 @@ impl App {
             siv.try_run_with(backend_init)?;
             Ok::<(), Error>(())
         });
-        let result = self.run_backend(tx, cancel).await;
+        let result = self.run_backend(tx, cancel.clone()).await;
+        cancel.cancel();
         if let Err(e) = ui_handle.join() {
             warn!(err = format!("{:?}", e), "failed to join ui thread");
         }

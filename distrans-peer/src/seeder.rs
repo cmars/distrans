@@ -6,7 +6,7 @@ use tokio::{fs::File, io::{AsyncReadExt, AsyncSeekExt}, select};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument, warn};
 use veilid_core::{
-    CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, DHTSchemaDFLT, KeyPair, RoutingContext, ValueData, VeilidAPIError, VeilidUpdate
+    CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, KeyPair, RoutingContext, ValueData, VeilidAPIError, VeilidUpdate
 };
 
 use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
@@ -88,7 +88,7 @@ impl Seeder {
         }
         let o_cnt = header.subkeys() + 1;
         let dht_rec = routing_context
-            .create_dht_record(DHTSchema::DFLT(DHTSchemaDFLT { o_cnt }), None)
+            .create_dht_record(DHTSchema::dflt(o_cnt)?, None)
             .await?;
         let dht_owner = KeyPair::new(
             dht_rec.owner().to_owned(),
@@ -117,7 +117,7 @@ impl Seeder {
         debug!(header_length = header_bytes.len(), "writing header");
 
         self.routing_context
-            .set_dht_value(self.dht_key.to_owned(), 0, header_bytes)
+            .set_dht_value(self.dht_key.to_owned(), 0, header_bytes, None)
             .await?;
         Ok(())
     }
@@ -136,6 +136,7 @@ impl Seeder {
                     self.dht_key.to_owned(),
                     subkey,
                     index_bytes[offset..offset + count].to_vec(),
+                    None,
                 )
                 .await?;
             subkey += 1;

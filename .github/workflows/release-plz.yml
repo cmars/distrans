@@ -19,9 +19,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install capnproto & protobuf for linux
-        run: ./tools/install_ubuntu.sh
-
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@v0.5
         env:

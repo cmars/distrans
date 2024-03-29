@@ -12,8 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - name: Install capnproto & protobuf for linux
-      run: ./tools/install_ubuntu.sh
     - name: Build
       run: cargo build --verbose --workspace
     - name: Run tests

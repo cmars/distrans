@@ -38,6 +38,7 @@ tag-name = "v{{version}}"
 [workspace.dependencies]
 sha2 = { version = "0.10", features = ["asm"] }
 tokio = { version = "1.36", features = ["full"] }
+veilid-core = "0.3.0"
 
 [package]
 name = "distrans"
@@ -82,7 +83,7 @@ tokio = { workspace = true }
 tokio-util = "0.7"
 tracing = { version = "0.1", features = ["log", "attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-veilid-core = "0.2.5"
+veilid-core = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 sha2 = { workspace = true }
