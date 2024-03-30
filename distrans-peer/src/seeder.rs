@@ -1,18 +1,27 @@
 use std::{cmp::min, path::PathBuf};
 
-use flume::Receiver;
+use flume::{unbounded, Receiver, Sender};
 use path_absolutize::*;
-use tokio::{fs::File, io::{AsyncReadExt, AsyncSeekExt}, select};
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncSeekExt},
+    select,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument, warn};
 use veilid_core::{
-    CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, KeyPair, RoutingContext, ValueData, VeilidAPIError, VeilidUpdate
+    CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, KeyPair, RoutingContext, ValueData,
+    VeilidAPIError, VeilidUpdate,
 };
 
 use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
 
-use crate::{other_err, proto::{decode_block_request, encode_header}, Error, Result};
-use crate::proto::{encode_index, Header};
+use crate::{proto::{encode_index, Header}, reconnect};
+use crate::{
+    other_err,
+    proto::{decode_block_request, encode_header},
+    Error, Result,
+};
 
 pub struct Seeder {
     routing_context: RoutingContext,
@@ -53,7 +62,7 @@ impl Seeder {
         // Create / open a DHT record for the payload digest
         let dht_rec = Self::open_or_create_dht_record(&routing_context, &header).await?;
 
-        let seeder = Seeder{
+        let seeder = Seeder {
             routing_context,
             index,
             header,
@@ -113,7 +122,8 @@ impl Seeder {
 
     async fn write_header(&self) -> Result<()> {
         // Encode the header
-        let header_bytes = encode_header(&self.index, self.header.subkeys(), self.header.route_data())?;
+        let header_bytes =
+            encode_header(&self.index, self.header.subkeys(), self.header.route_data())?;
         debug!(header_length = header_bytes.len(), "writing header");
 
         self.routing_context
@@ -144,25 +154,52 @@ impl Seeder {
         }
     }
 
-    pub async fn seed(mut self, cancel: CancellationToken, updates: Receiver<VeilidUpdate>) -> Result<()> {
+    pub async fn seed(
+        mut self,
+        cancel: CancellationToken,
+        updates: Receiver<VeilidUpdate>,
+    ) -> Result<()> {
         if self.index.files().len() > 1 {
             todo!("multi-file seeding not yet supported, sorry!");
         }
         let local_single_file = self.index.root().join(self.index.files()[0].path());
-        info!(dht_key = format!("{}", self.dht_key), file = format!("{:?}", local_single_file), "seeding");
+        info!(
+            dht_key = format!("{}", self.dht_key),
+            file = format!("{:?}", local_single_file),
+            "seeding"
+        );
         let mut fh: File = File::open(local_single_file).await?;
         let mut buf = [0u8; BLOCK_SIZE_BYTES];
+
+        let (route_tx, route_rx) = unbounded();
 
         loop {
             select! {
                 recv_update = updates.recv_async() => {
-                    let update = match recv_update {
-                        Ok(update) => update,
-                        Err(e) => return Err(other_err(e)),
-                    };
-                    if let Err(e) = self.handle_update(&mut fh, &mut buf, update).await {
+                    let update = recv_update.map_err(other_err)?;
+                    if let Err(e) = self.handle_update(&mut fh, &mut buf, update, route_tx.clone()).await {
                         warn!(err = format!("{:?}", e), "failed to handle update");
                     };
+                }
+                recv_update = route_rx.recv_async() => {
+                    let update = recv_update.map_err(other_err)?;
+                    let result = async {
+                        let (route_id, route_data) = self.routing_context.api().new_private_route().await?;
+                        debug!(route_id = format!("{}", route_id), "route changed");
+                        self.header = self.header.with_route_data(route_data);
+                        self.write_header().await?;
+                        Ok::<(), Error>(())
+                    }.await;
+                    if let Err(e) = result {
+                        warn!(err = format!("{:?}", e), "failed to obtain new private route");
+
+                        if let Err(e) = reconnect(&self.routing_context, &updates).await {
+                            warn!(err = format!("{:?}", e), "failed to reconnect to network");
+                        }
+
+                        // Re-queue the change
+                        route_tx.send_async(update).await.map_err(other_err)?;
+                    }
                 }
                 _ = cancel.cancelled() => {
                     info!("seeding cancelled");
@@ -177,7 +214,13 @@ impl Seeder {
         Ok(())
     }
 
-    async fn handle_update(&mut self, fh: &mut File, buf: &mut [u8], update: VeilidUpdate) -> Result<()> {
+    async fn handle_update(
+        &mut self,
+        fh: &mut File,
+        buf: &mut [u8],
+        update: VeilidUpdate,
+        route_tx: Sender<VeilidUpdate>,
+    ) -> Result<()> {
         match update {
             VeilidUpdate::AppCall(app_call) => {
                 let block_request = decode_block_request(app_call.message())?;
@@ -198,15 +241,11 @@ impl Seeder {
                 Ok(())
             }
             VeilidUpdate::RouteChange(_) => {
-                let (route_id, route_data) = self.routing_context.api().new_private_route().await?;
-                debug!(route_id = format!("{}", route_id), "route changed");
-                self.header = self.header.with_route_data(route_data);
-                self.write_header().await?;
+                route_tx.send_async(update).await.map_err(other_err)?;
                 Ok(())
             }
             VeilidUpdate::Shutdown => Err(Error::VeilidAPI(VeilidAPIError::Shutdown)),
             _ => Ok(()),
         }
     }
-
 }
