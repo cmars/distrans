@@ -10,10 +10,10 @@ use cursive::{
     CursiveRunnable, Vec2, View, With, XY,
 };
 use cursive_aligned_view::{Alignable, AlignedView};
-use distrans_peer::{veilid_config, Fetcher, Seeder};
+use distrans_peer::{veilid_config, wait_for_network, Fetcher, Seeder};
 use flume::{unbounded, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, trace, warn};
+use tracing::{debug, warn};
 use veilid_core::{RoutingContext, Sequencing, VeilidStateAttachment, VeilidUpdate};
 
 use crate::{cli::Commands, initialize_stderr_logging, initialize_ui_logging, Cli};
@@ -74,9 +74,14 @@ impl Display for State {
             State::ResolvingFetch { file: _, dht_key } => {
                 f.write_fmt(format_args!("resolving DHT key {} for fetch", dht_key))
             }
-            State::FetchingFile { file, dht_key, sha256 } => {
-                f.write_fmt(format_args!("fetching DHT key {} into {} sha256 {}", dht_key, file, sha256))
-            }
+            State::FetchingFile {
+                file,
+                dht_key,
+                sha256,
+            } => f.write_fmt(format_args!(
+                "fetching DHT key {} into {} sha256 {}",
+                dht_key, file, sha256
+            )),
             State::FetchComplete => f.write_str("fetch complete"),
             State::Stopping => f.write_str("stopping"),
             State::Stopped => f.write_str("stopped"),
@@ -104,7 +109,6 @@ impl App {
             loop {
                 match rx.recv_async().await {
                     Ok(state) => {
-                        info!(state = format!("{}", state));
                         if let State::Stopped = state {
                             return Ok(());
                         }
@@ -141,7 +145,11 @@ impl App {
                 }
                 while let Ok(state) = rx.try_recv() {
                     match &state {
-                        State::FetchingFile { file, dht_key , sha256} => {
+                        State::FetchingFile {
+                            file,
+                            dht_key,
+                            sha256,
+                        } => {
                             s.call_on_name("mode", |view: &mut TextView| {
                                 view.set_content("Fetching")
                             });
@@ -237,7 +245,27 @@ impl App {
     ) -> Result<()> {
         tx.send_async(State::Starting).await?;
         let (routing_context, updates) = self.new_routing_context().await?;
-        self.wait_for_network(&updates, &tx).await?;
+        wait_for_network(&updates, |update| {
+            match update {
+                VeilidUpdate::Attachment(attachment) => {
+                    if attachment.public_internet_ready {
+                        let _ = tx.send(State::Connected {
+                            attachment: attachment.clone(),
+                        });
+                    } else {
+                        let _ = tx.send(State::WaitingForNetwork {
+                            attachment: attachment.clone(),
+                        });
+                    }
+                    debug!(attachment = format!("{:?}", attachment));
+                }
+                VeilidUpdate::Shutdown => {
+                    cancel.cancel();
+                }
+                _ => {}
+            };
+        })
+        .await?;
 
         let ctrl_c_cancel = cancel.clone();
         let complete_cancel = cancel.clone();
@@ -329,35 +357,6 @@ impl App {
             .with_sequencing(Sequencing::EnsureOrdered)
             .with_default_safety()?;
         Ok((routing_context, updates))
-    }
-
-    async fn wait_for_network(
-        &self,
-        updates: &Receiver<VeilidUpdate>,
-        sender: &Sender<State>,
-    ) -> Result<()> {
-        // Wait for network to be up
-        loop {
-            let res = updates.recv_async().await;
-            match res {
-                Ok(VeilidUpdate::Attachment(attachment)) => {
-                    if attachment.public_internet_ready {
-                        sender.send_async(State::Connected { attachment }).await?;
-                        break;
-                    }
-                    sender
-                        .send_async(State::WaitingForNetwork { attachment })
-                        .await?;
-                }
-                Ok(u) => {
-                    trace!(update = format!("{:?}", u));
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-            };
-        }
-        Ok(())
     }
 
     fn theme() -> Theme {
