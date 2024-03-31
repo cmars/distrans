@@ -42,6 +42,10 @@ Or add the default package to a legacy `home.nix` with something like:
 
 See `distrans --help` for more options.
 
+## Try it!
+
+Try fetching a test file with `distrans get VLD0:cCHB85pEaV4bvRfywxnd2fRNBScR64UaJC8hoKzyr3M`.
+
 # Development
 
 In a Nix environment, `nix develop github:cmars/distrans` (or `nix develop` in this directory) to get a devshell with the necessary tool dependencies.
