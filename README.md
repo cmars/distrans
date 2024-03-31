@@ -46,6 +46,18 @@ See `distrans --help` for more options.
 
 Try fetching a test file with `distrans get VLD0:cCHB85pEaV4bvRfywxnd2fRNBScR64UaJC8hoKzyr3M`.
 
+## Troubleshooting
+
+### Clock skew
+
+Distrans operates an embedded Veilid node, which requires a synchronized local clock. Clock skew can prevent distrans from connecting to the Veilid network.
+
+### Debug logging
+
+Logging can be configured with the [RUST_LOG environment variable](https://docs.rs/env_logger/latest/env_logger/#enabling-logging).
+
+`RUST_LOG=debug` will enable all debug-level logging in distrans as well as veilid-core, which may be useful for troubleshooting low-level Veilid network problems and reporting issues.
+
 # Development
 
 In a Nix environment, `nix develop github:cmars/distrans` (or `nix develop` in this directory) to get a devshell with the necessary tool dependencies.
