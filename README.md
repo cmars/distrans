@@ -1,6 +1,8 @@
 # distrans
 
-![Crates.io Version](https://img.shields.io/crates/v/distrans)
+[![crates.io/crates/distrans](https://img.shields.io/crates/v/distrans.svg)](https://crates.io/crates/distrans)
+[![docs.rs/distrans-peer](https://img.shields.io/docsrs/distrans_peer)](https://docs.rs/distrans-peer)
+[![MPL-2.0](https://img.shields.io/crates/l/distrans.svg)](./LICENSE)
 
 "The bytes must flow."
 
