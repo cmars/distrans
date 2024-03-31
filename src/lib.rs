@@ -8,7 +8,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 pub fn initialize_stderr_logging() {
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
+        .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(std::io::stdout))
         .with(
             EnvFilter::builder()
                 .with_default_directive("distrans=debug".parse().unwrap())
