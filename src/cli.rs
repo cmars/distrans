@@ -45,7 +45,7 @@ impl Cli {
         let key_digest_bytes: [u8; 32] = key_digest.finalize().into();
         let dir_name = hex::encode(key_digest_bytes);
         let data_dir =
-            dirs::state_dir().ok_or(Error::Other("cannot resolve state dir".to_string()))?;
+            dirs::state_dir().or(dirs::data_local_dir()).ok_or(Error::Other("cannot resolve state dir".to_string()))?;
         let state_dir = data_dir
             .join("distrans")
             .join(dir_name)
