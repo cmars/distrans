@@ -10,11 +10,12 @@ use cursive::{
     CursiveRunnable, Vec2, View, With, XY,
 };
 use cursive_aligned_view::{Alignable, AlignedView};
-use distrans_peer::{veilid_config, wait_for_network, Fetcher, Seeder};
 use flume::{unbounded, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use veilid_core::{RoutingContext, Sequencing, VeilidStateAttachment, VeilidUpdate};
+
+use distrans_peer::{other_err, veilid_config, wait_for_network, Fetcher, Seeder};
 
 use crate::{cli::Commands, initialize_stderr_logging, initialize_ui_logging, Cli};
 
@@ -95,6 +96,10 @@ impl App {
     }
 
     pub async fn run(&mut self) -> Result<()> {
+        if self.cli.version() {
+            println!("distrans {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
         let (tx, rx) = unbounded();
         if self.cli.no_ui() {
             self.run_no_ui(tx, rx).await
@@ -316,6 +321,7 @@ impl App {
                 .await?;
                 seeder.seed(cancel, updates).await
             }
+            _ => Err(other_err("invalid command")),
         };
         complete_cancel.cancel();
         if let Err(e) = canceller.await {

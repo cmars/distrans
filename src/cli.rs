@@ -1,9 +1,7 @@
 use std::io::IsTerminal;
 
 use clap::{arg, Parser, Subcommand};
-
-use color_eyre::eyre::Result;
-use distrans_peer::{other_err, Error};
+use color_eyre::eyre::{Error, Result};
 use sha2::{Digest, Sha256};
 use tracing::debug;
 
@@ -23,7 +21,7 @@ pub struct Cli {
 
 impl Cli {
     pub fn no_ui(&self) -> bool {
-        return self.no_ui || !std::io::stdout().is_terminal()
+        return self.no_ui || !std::io::stdout().is_terminal();
     }
 
     pub fn state_dir(&self) -> Result<String> {
@@ -36,6 +34,7 @@ impl Cli {
                 ref root,
             } => self.state_dir_for(format!("get:{}:{}", dht_key, root)),
             Commands::Post { ref file } => self.state_dir_for(format!("post:{}", file.to_owned())),
+            _ => Err(Error::msg("invalid command")),
         }
     }
 
@@ -44,16 +43,24 @@ impl Cli {
         key_digest.update(&key.as_bytes());
         let key_digest_bytes: [u8; 32] = key_digest.finalize().into();
         let dir_name = hex::encode(key_digest_bytes);
-        let data_dir =
-            dirs::state_dir().or(dirs::data_local_dir()).ok_or(Error::Other("cannot resolve state dir".to_string()))?;
+        let data_dir = dirs::state_dir()
+            .or(dirs::data_local_dir())
+            .ok_or(Error::msg("cannot resolve state dir"))?;
         let state_dir = data_dir
             .join("distrans")
             .join(dir_name)
             .into_os_string()
             .into_string()
-            .map_err(|os| other_err(format!("{:?}", os)))?;
+            .map_err(|os| Error::msg(format!("{:?}", os)))?;
         debug!(state_dir);
         Ok(state_dir)
+    }
+
+    pub fn version(&self) -> bool {
+        if let Commands::Version = self.commands {
+            return true;
+        }
+        return false;
     }
 }
 
@@ -67,4 +74,5 @@ pub enum Commands {
     Post {
         file: String,
     },
+    Version,
 }
