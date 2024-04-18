@@ -15,7 +15,7 @@ name = "distrans_peer"
 path = "src/lib.rs"
 
 [dependencies]
-capnp = "0.18"
+capnp = "0.19"
 distrans_fileindex = { version = "0", path = "../distrans-fileindex" }
 flume = "0.11"
 hex = "0.4"
