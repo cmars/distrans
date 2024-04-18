@@ -33,7 +33,7 @@ sha2 = { workspace = true }
 sha2 = "0.10"
 
 [build-dependencies]
-capnpc = "0.18"
+capnpc = "0.19"
 hex = "0.4"
 
 [target.'cfg(unix)'.build-dependencies]
