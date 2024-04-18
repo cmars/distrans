@@ -65,7 +65,7 @@ name = "distrans"
 name = "stress"
 
 [dependencies]
-clap = {version = "4.4", features = ["derive", "env"]}
+clap = {version = "4.5", features = ["derive", "env"]}
 color-eyre = "0.6.2"
 cursive = { version = "0.20", default_features = false, features = ["crossterm-backend", "ansi"] }
 cursive-aligned-view = "^0"
