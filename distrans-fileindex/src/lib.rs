@@ -8,9 +8,9 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::{fs::File, task::JoinSet};
 
-mod error;
-
 pub use crate::error::{other_err, Error, Result};
+
+mod error;
 
 pub const BLOCK_SIZE_BYTES: usize = 32768;
 pub const PIECE_SIZE_BLOCKS: usize = 32; // 32 * 32KB blocks = 1MB
@@ -380,12 +380,14 @@ impl PayloadPiece {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use hex_literal::hex;
     use std::io::Write;
+
+    use hex_literal::hex;
     use tempfile::NamedTempFile;
 
-    fn temp_file(pattern: u8, count: usize) -> NamedTempFile {
+    use super::*;
+
+    pub fn temp_file(pattern: u8, count: usize) -> NamedTempFile {
         let mut tempf = NamedTempFile::new().expect("temp file");
         let contents = vec![pattern; count];
         tempf.write(contents.as_slice()).expect("write temp file");

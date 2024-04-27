@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use distrans_peer::{other_err, veilid_config, Error, Result};
+use distrans_peer::{veilid_config, Error, Result};
 
 use clap::{command, Parser};
 use flume::{unbounded, Receiver, Sender};
@@ -22,8 +22,8 @@ use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::prelude::*;
 use veilid_core::{
-    DHTRecordDescriptor, FromStr, KeyPair, RouteId, RoutingContext, Sequencing,
-    Target, TypedKey, VeilidUpdate,
+    DHTRecordDescriptor, FromStr, KeyPair, RouteId, RoutingContext, Sequencing, Target, TypedKey,
+    VeilidUpdate,
 };
 
 // This utility seeks to answer some basic questions worth answering before
@@ -167,7 +167,7 @@ impl App {
                     trace!(update = format!("{:?}", u));
                 }
                 Err(e) => {
-                    return Err(Error::Other(e.to_string()));
+                    return Err(Error::other(e.to_string()));
                 }
             };
         }
@@ -209,7 +209,7 @@ impl App {
             dht_rec.owner().to_owned(),
             dht_rec
                 .owner_secret()
-                .ok_or(other_err("expected dht owner secret"))?
+                .ok_or(Error::other("expected dht owner secret"))?
                 .to_owned(),
         );
         db.store_json(0, &[], dht_rec.key()).await?;
@@ -296,7 +296,7 @@ impl App {
                                 .app_call(Target::PrivateRoute(rid), msg),
                         )
                         .await
-                        .map_err(other_err)??;
+                        .map_err(Error::other)??;
                         let delta = t0.elapsed();
                         debug!(sent = msg_len, received = resp.len());
                         counter!("bytes_sent").increment(msg_len as u64);
@@ -330,7 +330,7 @@ impl App {
                     res = callee.updates.recv_async() => {
                         let update = match res {
                             Ok(update) => update,
-                            Err(e) => return Err(other_err(e)),
+                            Err(e) => return Err(Error::other(e)),
                         };
                         match update {
                             VeilidUpdate::AppCall(app_call) => {
