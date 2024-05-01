@@ -25,5 +25,5 @@ sha2 = { workspace = true }
 sha2 = "0.10"
 
 [dev-dependencies]
-hex-literal = "0.4"
+hex-literal = "0.4.1"
 tempfile = "3.10"
