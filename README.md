@@ -10,7 +10,7 @@ Distrans (distribution and transfer) sends and receives file content anonymously
 
 # Usage
 
-`distrans seed <file>` indexes and seeds a file , displaying the dht key which can be used to fetch it.
+`distrans seed <file>` indexes and seeds a file, displaying the dht key which can be used to fetch it.
 
 `distrans fetch <dht key> [directory]` fetches a file while it's being seeded (defaults to current directory).
 
