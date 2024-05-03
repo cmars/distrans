@@ -69,7 +69,7 @@ clap = {version = "4.5.4", features = ["derive", "env"]}
 color-eyre = "0.6.3"
 cursive = { version = "0.20", default_features = false, features = ["crossterm-backend", "ansi"] }
 cursive-aligned-view = "^0.6.0"
-cursive_buffered_backend = "0.6"
+cursive_buffered_backend = "0.6.1"
 dirs = "5.0.1"
 distrans_fileindex = { version = "0", path = "distrans-fileindex" }
 distrans_peer = { version = "0", path = "distrans-peer" }
