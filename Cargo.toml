@@ -80,7 +80,7 @@ metrics = "0.22.3"
 metrics-exporter-prometheus = { version = "0.14", features = ["http-listener"] }
 qr2term = "0.3.1"
 tokio = { workspace = true }
-tokio-util = "0.7"
+tokio-util = "0.7.10"
 tracing = { version = "0.1", features = ["log", "attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 veilid-core = { workspace = true }
