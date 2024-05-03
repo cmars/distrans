@@ -213,7 +213,7 @@ impl App {
                             });
                             s.call_on_name("share_text", |view: &mut TextView| {
                                 view.set_content(format!(
-                                    "Fetch this file with:\ndistrans get {}",
+                                    "Fetch this file with:\ndistrans fetch {}",
                                     dht_key
                                 ));
                             });
