@@ -15,7 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 flume = "0.11"
-thiserror = "1.0"
+thiserror = "1.0.59"
 tokio = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
