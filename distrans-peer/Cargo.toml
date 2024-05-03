@@ -20,7 +20,7 @@ capnp = "0.18"
 distrans_fileindex = { version = "0", path = "../distrans-fileindex" }
 flume = "0.11"
 hex = "0.4.3"
-path-absolutize = "3.1"
+path-absolutize = "3.1.1"
 thiserror = "1.0"
 tokio = { workspace = true }
 tokio-util = "0.7"
