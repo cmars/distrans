@@ -265,7 +265,7 @@ impl App {
         });
 
         let result = match self.cli.commands {
-            Commands::Get {
+            Commands::Fetch {
                 dht_key: ref share_key,
                 ref root,
             } => {
@@ -286,7 +286,7 @@ impl App {
                 tx.send_async(State::FetchComplete).await?;
                 Ok(())
             }
-            Commands::Post { ref file } => {
+            Commands::Seed { ref file } => {
                 tx.send_async(State::IndexingFile {
                     file: file.to_owned(),
                 })
