@@ -29,11 +29,11 @@ impl Cli {
             return Ok(s.to_owned());
         }
         match self.commands {
-            Commands::Get {
+            Commands::Fetch {
                 ref dht_key,
                 ref root,
             } => self.state_dir_for(format!("get:{}:{}", dht_key, root)),
-            Commands::Post { ref file } => self.state_dir_for(format!("post:{}", file.to_owned())),
+            Commands::Seed { ref file } => self.state_dir_for(format!("seed:{}", file.to_owned())),
             _ => Err(Error::msg("invalid command")),
         }
     }
@@ -66,12 +66,12 @@ impl Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    Get {
+    Fetch {
         dht_key: String,
         #[arg(default_value = ".")]
         root: String,
     },
-    Post {
+    Seed {
         file: String,
     },
     Version,
