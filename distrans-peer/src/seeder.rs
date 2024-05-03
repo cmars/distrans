@@ -1,6 +1,6 @@
-use std::{cmp::min, path::PathBuf};
+use std::path::PathBuf;
 
-use flume::{unbounded, Receiver, Sender};
+use backoff::{backoff::Backoff, ExponentialBackoff};
 use path_absolutize::*;
 use tokio::{
     fs::File,
@@ -8,197 +8,97 @@ use tokio::{
     select,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, instrument, warn};
-use veilid_core::{
-    CryptoKey, CryptoTyped, DHTRecordDescriptor, DHTSchema, KeyPair, RoutingContext, ValueData,
-    VeilidAPIError, VeilidUpdate,
-};
+use tracing::{debug, info, instrument};
+use veilid_core::{Target, VeilidAPIError, VeilidUpdate};
 
 use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
 
-use crate::{proto::{encode_index, Header}, reconnect};
+use crate::proto::Header;
 use crate::{
-    other_err,
-    proto::{decode_block_request, encode_header},
+    peer::{Peer, ShareKey},
+    proto::decode_block_request,
     Error, Result,
 };
 
-pub struct Seeder {
-    routing_context: RoutingContext,
+pub struct Seeder<P: Peer> {
+    peer: P,
     index: Index,
+    share_key: ShareKey,
+    target: Target,
     header: Header,
-    dht_key: CryptoTyped<CryptoKey>,
 }
 
-impl Seeder {
-    #[instrument(skip(routing_context), level = "debug", err)]
-    pub async fn from_file(routing_context: RoutingContext, file: &str) -> Result<Seeder> {
+impl<P: Peer> Seeder<P> {
+    #[instrument(skip(peer), level = "debug", err)]
+    pub async fn from_file(mut peer: P, file: &str) -> Result<Seeder<P>> {
         // Derive root directory
-        let file_path_buf: PathBuf = PathBuf::try_from(file).map_err(other_err)?;
+        let file_path_buf: PathBuf = PathBuf::from(file);
         let abs_file = file_path_buf.absolutize()?;
 
         // Build an index of the content to be shared
         info!(path = format!("{:?}", file_path_buf), "indexing file");
-        let index = Index::from_file(abs_file.into()).await?;
-        let index_bytes = encode_index(&index)?;
+        let index = Index::from_file(abs_file.into())
+            .await
+            .map_err(Error::index)?;
 
-        // Initial private route
-        let (_, route_data) = routing_context.api().new_private_route().await?;
-
-        // Initial header
-        let header = Header::new(
-            index.payload().digest().try_into()?,
-            index.payload().length(),
-            ((index_bytes.len() / 32768)
-                + if (index_bytes.len() % 32768) > 0 {
-                    1
-                } else {
-                    0
-                })
-            .try_into()?,
-            route_data.as_slice(),
-        );
-
-        // Create / open a DHT record for the payload digest
-        let dht_rec = Self::open_or_create_dht_record(&routing_context, &header).await?;
-
-        let seeder = Seeder {
-            routing_context,
+        let (share_key, target, header) = peer.announce(&index).await?;
+        Ok(Seeder {
+            peer,
             index,
+            share_key,
+            target,
             header,
-            dht_key: dht_rec.key().to_owned(),
-        };
-        seeder.announce(index_bytes.as_slice()).await?;
-        Ok(seeder)
+        })
     }
 
-    pub fn dht_key(&self) -> String {
-        self.dht_key.to_string()
+    pub fn share_key(&self) -> String {
+        self.share_key.to_string()
     }
 
     pub fn digest(&self) -> String {
         hex::encode(self.index.payload().digest())
     }
 
-    #[instrument(skip(routing_context, header), level = "trace", err)]
-    async fn open_or_create_dht_record(
-        routing_context: &RoutingContext,
-        header: &Header,
-    ) -> Result<DHTRecordDescriptor> {
-        let ts = routing_context.api().table_store()?;
-        let db = ts.open("distrans_payload_dht", 2).await?;
-        let digest_key = header.payload_digest();
-        let maybe_dht_key = db.load_json(0, digest_key.as_slice()).await?;
-        let maybe_dht_owner_keypair = db.load_json(1, digest_key.as_slice()).await?;
-        if let (Some(dht_key), Some(dht_owner_keypair)) = (maybe_dht_key, maybe_dht_owner_keypair) {
-            return Ok(routing_context
-                .open_dht_record(dht_key, dht_owner_keypair)
-                .await?);
-        }
-        let o_cnt = header.subkeys() + 1;
-        let dht_rec = routing_context
-            .create_dht_record(DHTSchema::dflt(o_cnt)?, None)
-            .await?;
-        let dht_owner = KeyPair::new(
-            dht_rec.owner().to_owned(),
-            dht_rec
-                .owner_secret()
-                .ok_or(other_err("expected dht owner secret"))?
-                .to_owned(),
-        );
-        db.store_json(0, digest_key.as_slice(), dht_rec.key())
-            .await?;
-        db.store_json(1, digest_key.as_slice(), &dht_owner).await?;
-        Ok(dht_rec)
-    }
-
-    #[instrument(skip(self, index_bytes), level = "trace", err)]
-    async fn announce(&self, index_bytes: &[u8]) -> Result<()> {
-        // Writing the header last, ensures we have a complete index written before "announcing".
-        self.write_index_bytes(index_bytes).await?;
-        self.write_header().await?;
-        Ok(())
-    }
-
-    async fn write_header(&self) -> Result<()> {
-        // Encode the header
-        let header_bytes =
-            encode_header(&self.index, self.header.subkeys(), self.header.route_data())?;
-        debug!(header_length = header_bytes.len(), "writing header");
-
-        self.routing_context
-            .set_dht_value(self.dht_key.to_owned(), 0, header_bytes, None)
-            .await?;
-        Ok(())
-    }
-
-    async fn write_index_bytes(&self, index_bytes: &[u8]) -> Result<()> {
-        let mut subkey = 1; // index starts at subkey 1 (header is subkey 0)
-        let mut offset = 0;
-        loop {
-            if offset > index_bytes.len() {
-                return Ok(());
-            }
-            let count = min(ValueData::MAX_LEN, index_bytes.len() - offset);
-            debug!(offset, count, "writing index");
-            self.routing_context
-                .set_dht_value(
-                    self.dht_key.to_owned(),
-                    subkey,
-                    index_bytes[offset..offset + count].to_vec(),
-                    None,
-                )
-                .await?;
-            subkey += 1;
-            offset += ValueData::MAX_LEN;
-        }
-    }
-
-    pub async fn seed(
-        mut self,
-        cancel: CancellationToken,
-        updates: Receiver<VeilidUpdate>,
-    ) -> Result<()> {
+    pub async fn seed(mut self, cancel: CancellationToken) -> Result<()> {
         if self.index.files().len() > 1 {
             todo!("multi-file seeding not yet supported, sorry!");
         }
         let local_single_file = self.index.root().join(self.index.files()[0].path());
         info!(
-            dht_key = format!("{}", self.dht_key),
+            share_key = format!("{}", self.share_key),
             file = format!("{:?}", local_single_file),
             "seeding"
         );
+
         let mut fh: File = File::open(local_single_file).await?;
         let mut buf = [0u8; BLOCK_SIZE_BYTES];
 
-        let (route_tx, route_rx) = unbounded();
+        let mut updates = self.peer.subscribe_veilid_update();
 
         loop {
             select! {
-                recv_update = updates.recv_async() => {
-                    let update = recv_update.map_err(other_err)?;
-                    if let Err(e) = self.handle_update(&mut fh, &mut buf, update, route_tx.clone()).await {
-                        warn!(err = format!("{:?}", e), "failed to handle update");
-                    };
-                }
-                recv_update = route_rx.recv_async() => {
-                    let update = recv_update.map_err(other_err)?;
-                    let result = async {
-                        let (route_id, route_data) = self.routing_context.api().new_private_route().await?;
-                        debug!(route_id = format!("{}", route_id), "route changed");
-                        self.header = self.header.with_route_data(route_data);
-                        self.write_header().await?;
-                        Ok::<(), Error>(())
-                    }.await;
-                    if let Err(e) = result {
-                        warn!(err = format!("{:?}", e), "failed to obtain new private route");
-
-                        if let Err(e) = reconnect(&self.routing_context, &updates).await {
-                            warn!(err = format!("{:?}", e), "failed to reconnect to network");
-                        }
-
-                        // Re-queue the change
-                        route_tx.send_async(update).await.map_err(other_err)?;
+                recv_update = updates.recv() => {
+                    let update = recv_update.map_err(Error::other)?;
+                    let mut back_off = Self::reroute_backoff();
+                    loop {
+                        match self.handle_update(&mut fh, &mut buf, &update).await {
+                            Ok(()) => break,
+                            Err(e) => {
+                                if Error::is_route_invalid(&e) {
+                                    if let Some(delay) = back_off.next_backoff() {
+                                        tokio::time::sleep(delay).await;
+                                    }
+                                    else {
+                                        return Err(e)
+                                    }
+                                    let (target, header) = self.peer.reannounce_route(&self.share_key, Some(self.target), &self.index, &self.header).await?;
+                                    self.target = target;
+                                    self.header = header;
+                                } else {
+                                    return Err(e)
+                                }
+                            }
+                        };
                     }
                 }
                 _ = cancel.cancelled() => {
@@ -207,23 +107,23 @@ impl Seeder {
                 }
             }
         }
-
-        if let Err(e) = self.routing_context.close_dht_record(self.dht_key).await {
-            warn!(err = format!("{:?}", e), "failed to close DHT record");
-        }
         Ok(())
+    }
+
+    fn reroute_backoff() -> ExponentialBackoff {
+        ExponentialBackoff::default()
     }
 
     async fn handle_update(
         &mut self,
         fh: &mut File,
         buf: &mut [u8],
-        update: VeilidUpdate,
-        route_tx: Sender<VeilidUpdate>,
+        update: &VeilidUpdate,
     ) -> Result<()> {
         match update {
-            VeilidUpdate::AppCall(app_call) => {
-                let block_request = decode_block_request(app_call.message())?;
+            &VeilidUpdate::AppCall(ref app_call) => {
+                let block_request =
+                    decode_block_request(app_call.message()).map_err(Error::remote_protocol)?;
                 // TODO: mmap would enable more concurrency here, but might not be as cross-platform?
                 fh.seek(std::io::SeekFrom::Start(
                     // TODO: wire this through Index to support multifile
@@ -234,18 +134,161 @@ impl Seeder {
                 .await?;
                 let rd = fh.read(buf).await?;
                 // TODO: Don't block here; we could handle another request in the meantime
-                self.routing_context
-                    .api()
-                    .app_call_reply(app_call.id(), buf[0..rd].to_vec())
+                self.peer
+                    .reply_block_contents(app_call.id(), &buf[0..rd])
                     .await?;
                 Ok(())
             }
-            VeilidUpdate::RouteChange(_) => {
-                route_tx.send_async(update).await.map_err(other_err)?;
+            &VeilidUpdate::RouteChange(ref route_change) => {
+                let target_route_id = match self.target {
+                    Target::NodeId(_) => return Ok(()),
+                    Target::PrivateRoute(ref route_id) => route_id.to_owned(),
+                };
+                if !route_change.dead_routes.contains(&target_route_id) {
+                    return Ok(());
+                }
+                debug!(target = target_route_id.to_string(), "route changed");
+
+                let (target, header) = self
+                    .peer
+                    .reannounce_route(
+                        &self.share_key,
+                        Some(self.target.to_owned()),
+                        &self.index,
+                        &self.header,
+                    )
+                    .await?;
+                self.target = target;
+                self.header = header;
                 Ok(())
             }
-            VeilidUpdate::Shutdown => Err(Error::VeilidAPI(VeilidAPIError::Shutdown)),
+            &VeilidUpdate::Shutdown => Err(Error::Fault(crate::error::Unexpected::Veilid(
+                VeilidAPIError::Shutdown,
+            ))),
             _ => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+
+    use tokio::time::sleep;
+    use veilid_core::{
+        FromStr, OperationId, TypedKey, VeilidAppCall, VeilidRouteChange, VeilidStateAttachment,
+        VeilidUpdate,
+    };
+
+    use crate::{
+        error::Unexpected,
+        proto::{encode_block_request, encode_index, BlockRequest},
+        tests::{temp_file, StubPeer},
+        ResilientPeer,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn from_dht_ok() {
+        // Temp file to seed, index it, create a stub key for target and share
+        let tf = temp_file(0xa5u8, 1048576);
+        let tf_path = std::env::temp_dir().join(tf.path()).to_owned();
+        let announce_index = Index::from_file(tf_path.clone().into())
+            .await
+            .expect("index");
+        let key = TypedKey::from_str("VLD0:cCHB85pEaV4bvRfywxnd2fRNBScR64UaJC8hoKzyr3M").unwrap();
+        let key_internal = key.clone();
+
+        // Track reannounce call
+        let reannounce_index = announce_index.clone();
+        let reannounce_calls = Arc::new(Mutex::new(0));
+        let reannounce_calls_internal = reannounce_calls.clone();
+
+        // Track reply_block_contents
+        let reply_calls = Arc::new(Mutex::new(0));
+        let reply_calls_internal = reply_calls.clone();
+
+        let mut stub_peer = StubPeer::new();
+        let update_tx = stub_peer.update_tx.clone();
+        stub_peer.reset_result = Arc::new(Mutex::new(move || Ok(())));
+        stub_peer.announce_result = Arc::new(Mutex::new(move || {
+            let index_bytes = encode_index(&announce_index).expect("encode index");
+            Ok((
+                key_internal.clone(),
+                Target::PrivateRoute(key_internal.value.clone()),
+                Header::from_index(&announce_index, &index_bytes, &[0xde, 0xad, 0xbe, 0xef]),
+            ))
+        }));
+        stub_peer.reannounce_route_result = Arc::new(Mutex::new(move || {
+            let index_bytes = encode_index(&reannounce_index).expect("encode index");
+            (*(reannounce_calls_internal.lock().unwrap())) += 1;
+            Ok((
+                Target::PrivateRoute(key_internal.value.clone()),
+                Header::from_index(&reannounce_index, &index_bytes, &[0xde, 0xad, 0xbe, 0xef]),
+            ))
+        }));
+        stub_peer.reply_block_contents_result = Arc::new(Mutex::new(move || {
+            (*(reply_calls_internal.lock().unwrap())) += 1;
+            Ok(())
+        }));
+        let rp = ResilientPeer::new(stub_peer);
+
+        // Simulate getting connected to network, normally track_node_state
+        // would set this when the node comes online.
+        update_tx
+            .send(VeilidUpdate::Attachment(Box::new(VeilidStateAttachment {
+                state: veilid_core::AttachmentState::AttachedGood,
+                public_internet_ready: true,
+                local_network_ready: true,
+            })))
+            .expect("send veilid update");
+
+        let seeder = Seeder::from_file(rp, tf_path.to_str().unwrap())
+            .await
+            .expect("from_file");
+        let cancel = CancellationToken::new();
+        let update_tx_internal = update_tx.clone();
+        tokio::spawn(async move {
+            // Simulate a request for a block
+            let request_bytes = encode_block_request(&BlockRequest { piece: 0, block: 0 })
+                .expect("encode block request");
+            sleep(Duration::from_millis(50)).await;
+            update_tx_internal
+                .send(VeilidUpdate::AppCall(Box::new(VeilidAppCall::new(
+                    None,
+                    None,
+                    request_bytes,
+                    OperationId::new(42u64),
+                ))))
+                .expect("send app call");
+
+            // Create a route change
+            sleep(Duration::from_millis(50)).await;
+            update_tx_internal
+                .send(VeilidUpdate::RouteChange(Box::new(VeilidRouteChange {
+                    dead_routes: vec![key_internal.value],
+                    dead_remote_routes: vec![],
+                })))
+                .expect("send route change");
+
+            // Shut down the node
+            sleep(Duration::from_millis(50)).await;
+            update_tx_internal
+                .send(VeilidUpdate::Shutdown)
+                .expect("shutdown");
+            Ok::<(), Error>(())
+        });
+        let result = seeder.seed(cancel).await;
+        assert!(matches!(
+            result,
+            Err(Error::Fault(Unexpected::Veilid(VeilidAPIError::Shutdown)))
+        ));
+
+        assert_eq!(*(reannounce_calls.lock().unwrap()), 1);
+        assert_eq!(*(reply_calls.lock().unwrap()), 1);
     }
 }

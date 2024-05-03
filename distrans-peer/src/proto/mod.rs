@@ -148,6 +148,22 @@ impl Header {
         }
     }
 
+    pub fn from_index(index: &Index, index_bytes: &[u8], route_data: &[u8]) -> Header {
+        Header::new(
+            index.payload().digest().try_into().unwrap(),
+            index.payload().length(),
+            ((index_bytes.len() / 32768)
+                + if (index_bytes.len() % 32768) > 0 {
+                    1
+                } else {
+                    0
+                })
+            .try_into()
+            .unwrap(),
+            route_data,
+        )
+    }
+
     pub fn payload_digest(&self) -> [u8; 32] {
         self.payload_digest.clone()
     }

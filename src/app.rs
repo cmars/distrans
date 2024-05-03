@@ -1,4 +1,4 @@
-use std::{cmp::max, collections::VecDeque, fmt::Display, path::PathBuf, sync::Arc, thread};
+use std::{cmp::max, collections::VecDeque, fmt::Display, thread};
 
 use color_eyre::eyre::{Error, Result};
 use cursive::{
@@ -12,10 +12,10 @@ use cursive::{
 use cursive_aligned_view::{Alignable, AlignedView};
 use flume::{unbounded, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
-use veilid_core::{RoutingContext, Sequencing, VeilidStateAttachment, VeilidUpdate};
+use tracing::warn;
+use veilid_core::VeilidStateAttachment;
 
-use distrans_peer::{other_err, veilid_config, wait_for_network, Fetcher, Seeder};
+use distrans_peer::{new_routing_context, Fetcher, Peer, ResilientPeer, Seeder, VeilidPeer};
 
 use crate::{cli::Commands, initialize_stderr_logging, initialize_ui_logging, Cli};
 
@@ -37,7 +37,7 @@ pub enum State {
     },
     SeedingFile {
         file: String,
-        dht_key: String,
+        share_key: String,
         sha256: String,
     },
     ResolvingFetch {
@@ -66,7 +66,7 @@ impl Display for State {
             State::IndexingFile { file } => f.write_fmt(format_args!("indexing file {}", file)),
             State::SeedingFile {
                 file,
-                dht_key,
+                share_key: dht_key,
                 sha256,
             } => f.write_fmt(format_args!(
                 "seeding file {} sha256 {} at DHT key {}",
@@ -193,7 +193,7 @@ impl App {
                         }
                         State::SeedingFile {
                             file,
-                            dht_key,
+                            share_key: dht_key,
                             sha256,
                         } => {
                             s.call_on_name("mode", |view: &mut TextView| {
@@ -249,28 +249,8 @@ impl App {
         cancel: CancellationToken,
     ) -> Result<()> {
         tx.send_async(State::Starting).await?;
-        let (routing_context, updates) = self.new_routing_context().await?;
-        wait_for_network(&updates, |update| {
-            match update {
-                VeilidUpdate::Attachment(attachment) => {
-                    if attachment.public_internet_ready {
-                        let _ = tx.send(State::Connected {
-                            attachment: attachment.clone(),
-                        });
-                    } else {
-                        let _ = tx.send(State::WaitingForNetwork {
-                            attachment: attachment.clone(),
-                        });
-                    }
-                    debug!(attachment = format!("{:?}", attachment));
-                }
-                VeilidUpdate::Shutdown => {
-                    cancel.cancel();
-                }
-                _ => {}
-            };
-        })
-        .await?;
+        let mut peer = self.new_peer().await?;
+        peer.reset().await?;
 
         let ctrl_c_cancel = cancel.clone();
         let complete_cancel = cancel.clone();
@@ -286,20 +266,19 @@ impl App {
 
         let result = match self.cli.commands {
             Commands::Get {
-                ref dht_key,
+                dht_key: ref share_key,
                 ref root,
             } => {
                 tx.send_async(State::ResolvingFetch {
                     file: root.to_owned(),
-                    dht_key: dht_key.to_owned(),
+                    dht_key: share_key.to_owned(),
                 })
                 .await?;
                 let fetcher =
-                    Fetcher::from_dht(routing_context.clone(), dht_key.as_str(), root.as_str())
-                        .await?;
+                    Fetcher::from_dht(peer.clone(), share_key.as_str(), root.as_str()).await?;
                 tx.send_async(State::FetchingFile {
                     file: fetcher.file(),
-                    dht_key: dht_key.to_owned(),
+                    dht_key: share_key.to_owned(),
                     sha256: fetcher.digest(),
                 })
                 .await?;
@@ -312,16 +291,16 @@ impl App {
                     file: file.to_owned(),
                 })
                 .await?;
-                let seeder = Seeder::from_file(routing_context.clone(), file.as_str()).await?;
+                let seeder = Seeder::from_file(peer.clone(), file.as_str()).await?;
                 tx.send_async(State::SeedingFile {
                     file: file.to_owned(),
-                    dht_key: seeder.dht_key(),
+                    share_key: seeder.share_key(),
                     sha256: seeder.digest(),
                 })
                 .await?;
-                seeder.seed(cancel, updates).await
+                seeder.seed(cancel).await
             }
-            _ => Err(other_err("invalid command")),
+            _ => Err(distrans_peer::Error::other("invalid command")),
         };
         complete_cancel.cancel();
         if let Err(e) = canceller.await {
@@ -331,7 +310,7 @@ impl App {
         if let Err(e) = tx.send_async(State::Stopping).await {
             warn!(err = format!("{}", e), "failed to send state");
         }
-        routing_context.api().shutdown().await;
+        peer.shutdown().await?;
         if let Err(e) = tx.send_async(State::Stopped).await {
             warn!(err = format!("{}", e), "failed to send state");
         }
@@ -339,30 +318,10 @@ impl App {
         Ok(result?)
     }
 
-    async fn new_routing_context(&self) -> Result<(RoutingContext, Receiver<VeilidUpdate>)> {
-        let state_path_buf = PathBuf::from(self.cli.state_dir()?);
-
-        // Veilid API state channel
-        let (node_sender, updates): (Sender<VeilidUpdate>, Receiver<VeilidUpdate>) = unbounded();
-
-        // Start up Veilid core
-        let update_callback = Arc::new(move |change: VeilidUpdate| {
-            let _ = node_sender.send(change);
-        });
-        let config_state_path = Arc::new(state_path_buf);
-        let config_callback = Arc::new(move |key| {
-            veilid_config::callback(config_state_path.to_str().unwrap().to_string(), key)
-        });
-
-        let api: veilid_core::VeilidAPI =
-            veilid_core::api_startup(update_callback, config_callback).await?;
-        api.attach().await?;
-
-        let routing_context = api
-            .routing_context()?
-            .with_sequencing(Sequencing::EnsureOrdered)
-            .with_default_safety()?;
-        Ok((routing_context, updates))
+    async fn new_peer(&self) -> Result<ResilientPeer<VeilidPeer>> {
+        let (routing_context, update_tx, _) = new_routing_context(&self.cli.state_dir()?).await?;
+        let peer = ResilientPeer::new(VeilidPeer::new(routing_context, update_tx).await?);
+        Ok(peer)
     }
 
     fn theme() -> Theme {

@@ -1,6 +1,6 @@
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS, PIECE_SIZE_BYTES};
@@ -11,95 +11,44 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument, warn};
-use veilid_core::{
-    CryptoKey, CryptoTyped, FromStr, RoutingContext, Target, TypedKey, VeilidAPIError,
-};
+use veilid_core::{FromStr, Target, TypedKey};
 
-use crate::proto::{decode_header, decode_index, encode_block_request, BlockRequest, Header};
-use crate::{other_err, Error, Result};
+use crate::peer::{Peer, ShareKey};
+use crate::proto::Header;
+use crate::{Error, Result};
 
 const N_FETCHERS: u8 = 20;
 
-pub struct Fetcher {
-    routing_context: RoutingContext,
-    header: Arc<Mutex<Header>>,
+pub struct Fetcher<P: Peer> {
+    peer: P,
+    share_key: ShareKey,
+    route: Arc<Mutex<(Target, Header)>>,
     index: Index,
-    dht_key: CryptoTyped<CryptoKey>,
 }
 
-impl Clone for Fetcher {
+impl<P: Peer> Clone for Fetcher<P> {
     fn clone(&self) -> Self {
         Self {
-            routing_context: self.routing_context.clone(),
-            header: Arc::clone(&self.header),
+            peer: self.peer.clone(),
+            share_key: self.share_key.clone(),
+            route: Arc::clone(&self.route),
             index: self.index.clone(),
-            dht_key: self.dht_key.clone(),
         }
     }
 }
 
-impl Fetcher {
-    pub async fn from_dht(
-        routing_context: RoutingContext,
-        dht_key_str: &str,
-        root: &str,
-    ) -> Result<Fetcher> {
-        let dht_key = TypedKey::from_str(dht_key_str)?;
-        routing_context
-            .open_dht_record(dht_key.clone(), None)
-            .await?;
-
-        let header = Self::read_header(&routing_context, &dht_key).await?;
-        debug!(header = format!("{:?}", header));
-
-        let root_path_buf = PathBuf::from_str(root).map_err(other_err)?;
-        let index = Self::read_index(&routing_context, &dht_key, &header, &root_path_buf).await?;
-        debug!(index = format!("{:?}", index));
+impl<P: Peer + 'static> Fetcher<P> {
+    pub async fn from_dht(mut peer: P, share_key_str: &str, root: &str) -> Result<Fetcher<P>> {
+        let share_key = TypedKey::from_str(share_key_str)?;
+        let root_path_buf = PathBuf::from_str(root).unwrap();
+        let (target, header, index) = peer.resolve(&share_key, &root_path_buf).await?;
 
         Ok(Fetcher {
-            routing_context,
-            header: Arc::new(Mutex::new(header)),
+            peer,
+            share_key,
+            route: Arc::new(Mutex::new((target, header))),
             index,
-            dht_key,
         })
-    }
-
-    async fn read_header(
-        routing_context: &RoutingContext,
-        dht_key: &CryptoTyped<CryptoKey>,
-    ) -> Result<Header> {
-        let subkey_value = match routing_context
-            .get_dht_value(dht_key.to_owned(), 0, true)
-            .await?
-        {
-            Some(value) => value,
-            None => return Err(Error::NotReady),
-        };
-        Ok(decode_header(subkey_value.data())?)
-    }
-
-    async fn read_index(
-        routing_context: &RoutingContext,
-        dht_key: &CryptoTyped<CryptoKey>,
-        header: &Header,
-        root: &Path,
-    ) -> Result<Index> {
-        let mut index_bytes = vec![];
-        for i in 0..header.subkeys() {
-            let subkey_value = match routing_context
-                .get_dht_value(dht_key.to_owned(), (i + 1) as u32, true)
-                .await?
-            {
-                Some(value) => value,
-                None => return Err(Error::NotReady),
-            };
-            index_bytes.extend_from_slice(subkey_value.data());
-        }
-        Ok(decode_index(
-            root.to_path_buf(),
-            header,
-            index_bytes.as_slice(),
-        )?)
     }
 
     pub fn file(&self) -> String {
@@ -127,7 +76,8 @@ impl Fetcher {
             fetch_block_sender.clone(),
             index,
         ));
-        tasks.spawn(self.clone().verify_blocks(
+        tasks.spawn(Self::verify_blocks(
+            self.index.clone(),
             cancel.clone(),
             done.clone(),
             fetch_block_sender.clone(),
@@ -149,25 +99,22 @@ impl Fetcher {
                 Ok(res) => {
                     if let Err(e) = res {
                         warn!(err = format!("{}", e));
-                        result = Err(e);
+                        if let Ok(_) = result {
+                            result = Err(e);
+                        }
+                        cancel.cancel();
                     }
                 }
-                Err(e) => result = Err(other_err(e)),
+                Err(e) => {
+                    if let Ok(_) = result {
+                        result = Err(Error::other(e));
+                    }
+                    cancel.cancel();
+                }
             }
         }
 
-        if let Err(e) = self
-            .routing_context
-            .close_dht_record(self.dht_key.to_owned())
-            .await
-        {
-            warn!(err = format!("{}", e), "failed to close DHT record");
-        }
         result
-    }
-
-    fn route_data(&self) -> Vec<u8> {
-        self.header.lock().unwrap().route_data().to_vec()
     }
 
     async fn fetch_blocks(
@@ -180,12 +127,6 @@ impl Fetcher {
         task_id: u8,
     ) -> Result<()> {
         let mut fh_map: HashMap<usize, File> = HashMap::new();
-        let route_data = self.route_data();
-        let mut peer_target = Target::PrivateRoute(
-            self.routing_context
-                .api()
-                .import_remote_private_route(route_data)?,
-        );
         loop {
             tokio::select! {
                 recv_fetch = fetch_block_receiver.recv_async() => {
@@ -210,17 +151,20 @@ impl Fetcher {
                         };
 
                         fh.seek(SeekFrom::Start(fetch.block_offset() as u64)).await?;
-                        let mut block = match self.request_block(
-                            peer_target.clone(),
+                        let target = self.target();
+                        let result = self.peer.request_block(
+                            target.clone(),
                             fetch.piece_index,
                             fetch.block_index,
-                        ).await {
-                            Err(Error::RouteChanged{ target }) => {
-                                peer_target = target.clone();
-                                Err(Error::RouteChanged { target })
+                        ).await;
+                        if let Err(e) = result {
+                            if Error::is_route_invalid(&e) {
+                                let (target, header) = self.peer.reresolve_route(&self.share_key, Some(target)).await?;
+                                self.set_route(target, header);
                             }
-                            result => result,
-                        }?;
+                            return Err(e);
+                        }
+                        let mut block = result?;
 
                         let block_end = min(block.len(), BLOCK_SIZE_BYTES);
                         fh.write_all(block[fetch.piece_offset..block_end].as_mut()).await?;
@@ -229,62 +173,32 @@ impl Fetcher {
                             fetch.piece_index,
                             fetch.piece_offset,
                             self.index.payload().pieces()[fetch.piece_index].block_count(),
-                            fetch.block_index)).await.map_err(other_err)?;
+                            fetch.block_index)).await.map_err(Error::other)?;
                         Ok(())
                     }.await;
                     if let Err(e) = fetch_result {
                         warn!(err = format!("{}", e), "fetch block failed, queued for retry");
-                        fetch_block_sender.send_async(fetch).await.map_err(other_err)?;
+                        fetch_block_sender.send_async(fetch).await.map_err(Error::other)?;
                     }
                 }
                 _ = done.cancelled() => {
                     return Ok(())
                 }
                 _ = cancel.cancelled() => {
-                    return Err(other_err("cancelled"))
+                    return Err(Error::other("cancelled"))
                 }
             }
         }
     }
 
-    async fn request_block(
-        &mut self,
-        target: Target,
-        piece: usize,
-        block: usize,
-    ) -> Result<Vec<u8>> {
-        let block_req = BlockRequest {
-            piece: piece as u32,
-            block: block as u8,
-        };
-        let block_req_bytes = encode_block_request(&block_req)?;
-        let result = self.routing_context.app_call(target, block_req_bytes).await;
-        match result {
-            Ok(resp_bytes) => Ok(resp_bytes),
-            Err(VeilidAPIError::InvalidTarget { message }) => {
-                warn!(message, "refreshing route");
-                let target = self.refresh_route().await?;
-                Err(Error::RouteChanged { target })
-            }
-            Err(e) => Err(Error::VeilidAPI(e)),
-        }
+    fn target(&self) -> Target {
+        self.route.lock().unwrap().0.to_owned()
     }
 
-    #[instrument(skip(self), level = "trace", err)]
-    async fn refresh_route(&mut self) -> Result<Target> {
-        let new_header = Self::read_header(&self.routing_context, &self.dht_key).await?;
-        let target = self
-            .routing_context
-            .api()
-            .import_remote_private_route(new_header.route_data().to_vec())?;
-        self.set_header(new_header);
-        Ok(Target::PrivateRoute(target))
-    }
-
-    fn set_header(&mut self, header: Header) {
-        debug!(route_data = hex::encode(header.route_data()), "set_header");
-        let mut header_guard = self.header.lock().unwrap();
-        *header_guard = header;
+    fn set_route(&mut self, target: Target, header: Header) {
+        debug!(route_data = hex::encode(header.route_data()), "set_route");
+        let mut route_guard = self.route.lock().unwrap();
+        *route_guard = (target, header);
     }
 
     async fn enqueue_blocks(
@@ -299,7 +213,7 @@ impl Fetcher {
             let mut pos = 0;
             while pos < file_spec.contents().length() {
                 if cancel.is_cancelled() {
-                    return Err(other_err("cancelled"));
+                    return Err(Error::other("cancelled"));
                 }
                 sender
                     .send(FileBlockFetch {
@@ -308,7 +222,7 @@ impl Fetcher {
                         piece_offset,
                         block_index,
                     })
-                    .map_err(other_err)?;
+                    .map_err(Error::other)?;
                 pos += BLOCK_SIZE_BYTES - piece_offset;
                 piece_offset = 0;
                 block_index += 1;
@@ -322,7 +236,7 @@ impl Fetcher {
     }
 
     async fn verify_blocks(
-        self,
+        index: Index,
         cancel: CancellationToken,
         done: CancellationToken,
         fetch_block_sender: Sender<FileBlockFetch>,
@@ -350,10 +264,10 @@ impl Fetcher {
                     }
                     if to_verify.is_complete() {
                         // verify complete ones
-                        if self.verify_piece(to_verify.file_index, to_verify.piece_index).await? {
+                        if Self::verify_piece(&index, to_verify.file_index, to_verify.piece_index).await? {
                             debug!(file_index = to_verify.file_index, piece_index = to_verify.piece_index, "digest verified");
                             verified_pieces += 1;
-                            if verified_pieces == self.index.payload().pieces().len() {
+                            if verified_pieces == index.payload().pieces().len() {
                                 info!("all pieces validated");
                                 done.cancel();
                                 return Ok(())
@@ -365,7 +279,7 @@ impl Fetcher {
                                 to_verify.file_index,
                                 to_verify.piece_index,
                                 to_verify.piece_offset,
-                                self.index.payload().pieces()[to_verify.piece_index].block_count(),
+                                index.payload().pieces()[to_verify.piece_index].block_count(),
                             ));
                             for block_index in 0..32  {
                                 fetch_block_sender.send_async(FileBlockFetch{
@@ -373,22 +287,23 @@ impl Fetcher {
                                     piece_index: to_verify.piece_index,
                                     piece_offset: to_verify.piece_offset,
                                     block_index,
-                                }).await.map_err(other_err)?;
+                                }).await.map_err(Error::other)?;
                             }
                         }
                     }
                 }
                 _ = cancel.cancelled() => {
-                    return Err(other_err("cancelled"))
+                    return Err(Error::other("cancelled"))
                 }
             }
         }
     }
 
-    async fn verify_piece(&self, file_index: usize, piece_index: usize) -> Result<bool> {
-        let file_spec = &self.index.files()[file_index];
-        let mut fh = File::open(file_spec.path()).await?;
-        let piece_spec = &self.index.payload().pieces()[piece_index];
+    #[instrument(skip(index), err)]
+    async fn verify_piece(index: &Index, file_index: usize, piece_index: usize) -> Result<bool> {
+        let file_spec = &index.files()[file_index];
+        let mut fh = File::open(index.root().join(file_spec.path())).await?;
+        let piece_spec = &index.payload().pieces()[piece_index];
 
         fh.seek(SeekFrom::Start((piece_index * PIECE_SIZE_BYTES) as u64))
             .await?;
@@ -484,5 +399,73 @@ impl PieceState {
         }
         self.blocks |= other.blocks;
         self.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use veilid_core::{VeilidStateAttachment, VeilidUpdate};
+
+    use crate::{
+        proto::encode_index,
+        tests::{temp_file, StubPeer},
+        ResilientPeer,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn from_dht_ok() {
+        let tf = temp_file(0xa5u8, 1048576);
+        let index = Index::from_file(std::env::temp_dir().join(tf.path()).into())
+            .await
+            .expect("index");
+
+        let mut stub_peer = StubPeer::new();
+        let update_tx = stub_peer.update_tx.clone();
+        stub_peer.reset_result = Arc::new(Mutex::new(move || Ok(())));
+        stub_peer.resolve_result = Arc::new(Mutex::new(move || {
+            let index_internal = index.clone();
+            let route_key =
+                TypedKey::from_str("VLD0:cCHB85pEaV4bvRfywxnd2fRNBScR64UaJC8hoKzyr3M").unwrap();
+            let index_bytes = encode_index(&index_internal).expect("encode index");
+            Ok((
+                Target::PrivateRoute(route_key.value),
+                Header::from_index(
+                    &index_internal,
+                    index_bytes.as_slice(),
+                    &[0xde, 0xad, 0xbe, 0xef],
+                ),
+                index_internal,
+            ))
+        }));
+        stub_peer.request_block_result = Arc::new(Mutex::new(|| Ok(vec![0xa5u8; 32768])));
+        let rp = ResilientPeer::new(stub_peer);
+        // Simulate getting connected to network, normally track_node_state
+        // would set this when the node comes online.
+        update_tx
+            .send(VeilidUpdate::Attachment(Box::new(VeilidStateAttachment {
+                state: veilid_core::AttachmentState::AttachedGood,
+                public_internet_ready: true,
+                local_network_ready: true,
+            })))
+            .expect("send veilid update");
+
+        let tdir = tempfile::TempDir::new().expect("tempdir");
+        let fetcher = Fetcher::from_dht(
+            rp,
+            "VLD0:cCHB85pEaV4bvRfywxnd2fRNBScR64UaJC8hoKzyr3M",
+            tdir.path().to_str().unwrap(),
+        )
+        .await
+        .expect("from_dht");
+        let cancel = CancellationToken::new();
+        fetcher.fetch(cancel).await.expect("fetch");
+        // Simulate a shutdown so that track_node_state exits.
+        update_tx
+            .send(VeilidUpdate::Shutdown)
+            .expect("send veilid update");
     }
 }
