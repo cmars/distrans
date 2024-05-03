@@ -76,7 +76,7 @@ distrans_peer = { version = "0", path = "distrans-peer" }
 flume = "0.11"
 futures = "0.3"
 hex = "0.4.3"
-metrics = "0.22"
+metrics = "0.22.3"
 metrics-exporter-prometheus = { version = "0.14", features = ["http-listener"] }
 qr2term = "0.3"
 tokio = { workspace = true }
