@@ -38,7 +38,7 @@ tag-name = "v{{version}}"
 [workspace.dependencies]
 sha2 = { version = "0.10", features = ["asm"] }
 tokio = { version = "1.37", features = ["full"] }
-veilid-core = "0.3.1"
+veilid-core = "0.3.2"
 
 [package]
 name = "distrans"
