@@ -28,7 +28,7 @@ targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-
 pr-run-mode = "upload"
 # Where to host releases
 hosting = ["github"]
-# Allow dirty necessary as we've had to customize the action
+# Skip checking whether the specified configuration files are up to date
 allow-dirty = ["ci"]
 
 [workspace.metadata.release]
@@ -38,6 +38,7 @@ tag-name = "v{{version}}"
 [workspace.dependencies]
 sha2 = { version = "0.10.8", features = ["asm"] }
 tokio = { version = "1.37", features = ["full"] }
+tracing = { version = "0.1.40", features = ["log", "attributes"] }
 veilid-core = "0.3.2"
 
 [package]
@@ -61,29 +62,18 @@ eula = false
 [[bin]]
 name = "distrans"
 
-[[bin]]
-name = "stress"
-
 [dependencies]
 clap = {version = "4.5.4", features = ["derive", "env"]}
 color-eyre = "0.6.3"
-cursive = { version = "0.20", default_features = false, features = ["crossterm-backend", "ansi"] }
-cursive-aligned-view = "^0.6.0"
-cursive_buffered_backend = "0.6.1"
 dirs = "5.0.1"
 distrans_fileindex = { version = "0", path = "distrans-fileindex" }
 distrans_peer = { version = "0", path = "distrans-peer" }
-flume = "0.11"
-futures = "0.3.30"
 hex = "0.4.3"
-metrics = "0.22.3"
-metrics-exporter-prometheus = { version = "0.14", features = ["http-listener"] }
-qr2term = "0.3.1"
+indicatif = { version = "0.17.8", features = ["tokio", "futures"] }
 tokio = { workspace = true }
 tokio-util = "0.7.10"
 tracing = { version = "0.1.40", features = ["log", "attributes"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-veilid-core = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 sha2 = { workspace = true }

@@ -1,259 +1,103 @@
-use std::{cmp::max, collections::VecDeque, fmt::Display, thread};
+use std::time::Duration;
 
-use color_eyre::eyre::{Error, Result};
-use cursive::{
-    align::{Align, HAlign},
-    event::Event,
-    theme::{BorderStyle, Palette, Theme},
-    view::{Nameable, Resizable, ScrollStrategy},
-    views::{LinearLayout, Panel, ScrollView, TextView, ThemedView},
-    CursiveRunnable, Vec2, View, With, XY,
-};
-use cursive_aligned_view::{Alignable, AlignedView};
-use flume::{unbounded, Receiver, Sender};
+use color_eyre::{eyre::Error, Result};
+use distrans_fileindex::Indexer;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use tokio::{select, spawn};
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
-use veilid_core::VeilidStateAttachment;
 
-use distrans_peer::{new_routing_context, Fetcher, Peer, ResilientPeer, Seeder, VeilidPeer};
+use distrans_peer::{
+    new_routing_context, Fetcher, Peer, PeerState, ResilientPeer, Seeder, VeilidPeer,
+};
 
-use crate::{cli::Commands, initialize_stderr_logging, initialize_ui_logging, Cli};
+use crate::{cli::Commands, initialize_ui_logging, Cli};
 
 pub struct App {
     cli: Cli,
-}
-
-#[derive(Debug)]
-pub enum State {
-    Starting,
-    WaitingForNetwork {
-        attachment: Box<VeilidStateAttachment>,
-    },
-    Connected {
-        attachment: Box<VeilidStateAttachment>,
-    },
-    IndexingFile {
-        file: String,
-    },
-    SeedingFile {
-        file: String,
-        share_key: String,
-        sha256: String,
-    },
-    ResolvingFetch {
-        file: String,
-        dht_key: String,
-    },
-    FetchingFile {
-        file: String,
-        dht_key: String,
-        sha256: String,
-    },
-    FetchComplete,
-    Stopping,
-    Stopped,
-}
-
-impl Display for State {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            State::Starting => f.write_str("starting"),
-            State::WaitingForNetwork { attachment } => f.write_fmt(format_args!(
-                "waiting for network: {}",
-                format!("{:?}", attachment)
-            )),
-            State::Connected { attachment: _ } => f.write_str("connected"),
-            State::IndexingFile { file } => f.write_fmt(format_args!("indexing file {}", file)),
-            State::SeedingFile {
-                file,
-                share_key: dht_key,
-                sha256,
-            } => f.write_fmt(format_args!(
-                "seeding file {} sha256 {} at DHT key {}",
-                file, sha256, dht_key
-            )),
-            State::ResolvingFetch { file: _, dht_key } => {
-                f.write_fmt(format_args!("resolving DHT key {} for fetch", dht_key))
-            }
-            State::FetchingFile {
-                file,
-                dht_key,
-                sha256,
-            } => f.write_fmt(format_args!(
-                "fetching DHT key {} into {} sha256 {}",
-                dht_key, file, sha256
-            )),
-            State::FetchComplete => f.write_str("fetch complete"),
-            State::Stopping => f.write_str("stopping"),
-            State::Stopped => f.write_str("stopped"),
-        }
-    }
+    spinner_style: ProgressStyle,
+    bar_style: ProgressStyle,
+    bytes_style: ProgressStyle,
+    msg_style: ProgressStyle,
 }
 
 impl App {
     pub fn new(cli: Cli) -> Result<App> {
-        Ok(App { cli })
+        Ok(App {
+            cli,
+            spinner_style: ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")?
+                .tick_chars("⣾⣷⣯⣟⡿⢿⣻⣽"),
+            bar_style: ProgressStyle::with_template(
+                "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+            )?,
+            bytes_style: ProgressStyle::with_template(
+                "[{elapsed_precise}] {wide_bar:.cyan/blue} {bytes}/{total_bytes} {msg}",
+            )?,
+            msg_style: ProgressStyle::with_template("{prefix:.bold} {msg}")?,
+        })
     }
 
     pub async fn run(&mut self) -> Result<()> {
+        let m = MultiProgress::new();
+        let _ = m.println(format!("🦇 distrans {}", env!("CARGO_PKG_VERSION")));
+
         if self.cli.version() {
-            println!("distrans {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        let (tx, rx) = unbounded();
-        if self.cli.no_ui() {
-            self.run_no_ui(tx, rx).await
-        } else {
-            self.run_ui(tx, rx).await
-        }
-    }
 
-    async fn run_no_ui(&mut self, tx: Sender<State>, rx: Receiver<State>) -> Result<()> {
-        initialize_stderr_logging();
-        let logger = tokio::spawn(async move {
+        initialize_ui_logging(m.clone());
+
+        let mut peer = self.new_peer().await?;
+        let cancel = CancellationToken::new();
+
+        let mut peer_progress_rx = peer.subscribe_peer_progress();
+        let peer_progress_bar = m.add(ProgressBar::new(0u64));
+        peer_progress_bar.set_style(self.spinner_style.clone());
+        peer_progress_bar.set_prefix("🟥");
+        peer_progress_bar.enable_steady_tick(Duration::from_millis(100));
+        let peer_progress_cancel = cancel.clone();
+        let (peer_spinner_style, peer_msg_style) =
+            (self.spinner_style.clone(), self.msg_style.clone());
+        spawn(async move {
             loop {
-                match rx.recv_async().await {
-                    Ok(state) => {
-                        if let State::Stopped = state {
-                            return Ok(());
-                        }
+                select! {
+                    _ = peer_progress_cancel.cancelled() => {
+                        return Ok::<(), Error>(());
                     }
-                    Err(e) => return Err(e),
+                    peer_result = peer_progress_rx.changed() => {
+                        peer_result?;
+                        let peer_progress = peer_progress_rx.borrow();
+                        if let PeerState::Connected = peer_progress.state {
+                            peer_progress_bar.set_style(peer_msg_style.clone());
+                            peer_progress_bar.set_prefix("🟢");
+                            peer_progress_bar.disable_steady_tick();
+                            peer_progress_bar.finish_with_message("Connected to Veilid network");
+                            continue;
+                        } else if peer_progress_bar.is_finished() {
+                            peer_progress_bar.reset();
+                            peer_progress_bar.set_style(peer_spinner_style.clone());
+                            peer_progress_bar.enable_steady_tick(Duration::from_millis(100));
+                            peer_progress_bar.set_prefix("🟥");
+                        }
+                        let (prefix, message) = match peer_progress.state {
+                            PeerState::Starting => ("🟥","Starting peer"),
+                            PeerState::Connecting => ("🔴","Connecting to Veilid network"),
+                            PeerState::Announcing => ("🟡","Announcing share"),
+                            PeerState::Resolving => ("🟡","Resolving share"),
+                            _ => continue,
+                        };
+                        peer_progress_bar.set_prefix(prefix);
+                        peer_progress_bar.set_message(message);
+                        peer_progress_bar.update(|pb| {
+                            pb.set_len(peer_progress.length);
+                            pb.set_pos(peer_progress.position);
+                        });
+                    }
                 }
             }
         });
-        let result = self.run_backend(tx, CancellationToken::new()).await;
-        if let Err(e) = logger.await {
-            warn!(err = format!("{:?}", e), "failed to join logger task");
-        }
-        result
-    }
-
-    async fn run_ui(&mut self, tx: Sender<State>, rx: Receiver<State>) -> Result<()> {
-        let cancel = CancellationToken::new();
-        let quit_cancel = cancel.clone();
-        let poll_cancel = cancel.clone();
-        let (log_tx, log_rx) = unbounded();
-        initialize_ui_logging(log_tx);
-        let ui_handle = thread::spawn(move || {
-            let mut siv = cursive::default();
-            siv.set_theme(Self::theme());
-            siv.set_autorefresh(true);
-            siv.add_global_callback('q', move |s| {
-                quit_cancel.cancel();
-                s.quit();
-            });
-            Self::add_panel(&mut siv, log_rx);
-            siv.add_global_callback(Event::Refresh, move |s| {
-                if poll_cancel.is_cancelled() {
-                    s.quit();
-                }
-                while let Ok(state) = rx.try_recv() {
-                    match &state {
-                        State::FetchingFile {
-                            file,
-                            dht_key,
-                            sha256,
-                        } => {
-                            s.call_on_name("mode", |view: &mut TextView| {
-                                view.set_content("Fetching")
-                            });
-                            s.call_on_name("dht_key", |view: &mut TextView| {
-                                view.set_content(dht_key)
-                            });
-                            s.call_on_name("file", |view: &mut TextView| view.set_content(file));
-                            s.call_on_name("sha256", |view: &mut TextView| {
-                                view.set_content(sha256)
-                            });
-                        }
-                        State::ResolvingFetch { file, dht_key } => {
-                            s.call_on_name("mode", |view: &mut TextView| {
-                                view.set_content("Resolving")
-                            });
-                            s.call_on_name("dht_key", |view: &mut TextView| {
-                                view.set_content(dht_key)
-                            });
-                            s.call_on_name("file", |view: &mut TextView| view.set_content(file));
-                            s.call_on_name("qr_code", |view: &mut TextView| {
-                                view.set_content(cursive::utils::markup::ansi::parse(
-                                    qr2term::generate_qr_string(dht_key).unwrap(),
-                                ))
-                            });
-                        }
-                        State::FetchComplete => {
-                            s.call_on_name("mode", |view: &mut TextView| {
-                                view.set_content("Completed")
-                            });
-                        }
-                        State::IndexingFile { file } => {
-                            s.call_on_name("mode", |view: &mut TextView| {
-                                view.set_content("Indexing")
-                            });
-                            s.call_on_name("file", |view: &mut TextView| view.set_content(file));
-                        }
-                        State::SeedingFile {
-                            file,
-                            share_key: dht_key,
-                            sha256,
-                        } => {
-                            s.call_on_name("mode", |view: &mut TextView| {
-                                view.set_content("Seeding")
-                            });
-                            s.call_on_name("file", |view: &mut TextView| view.set_content(file));
-                            s.call_on_name("sha256", |view: &mut TextView| {
-                                view.set_content(sha256)
-                            });
-                            s.call_on_name("dht_key", |view: &mut TextView| {
-                                view.set_content(dht_key)
-                            });
-                            s.call_on_name("qr_code", |view: &mut TextView| {
-                                view.set_content(cursive::utils::markup::ansi::parse(
-                                    qr2term::generate_qr_string(dht_key).unwrap(),
-                                ))
-                            });
-                            s.call_on_name("share_text", |view: &mut TextView| {
-                                view.set_content(format!(
-                                    "Fetch this file with:\ndistrans fetch {}",
-                                    dht_key
-                                ));
-                            });
-                        }
-                        _ => {}
-                    }
-                    s.call_on_name("status", |view: &mut TextView| {
-                        view.set_content(format!("{}", state));
-                    });
-                }
-            });
-
-            // Use buffered backend to prevent refresh flickering. crossterm redraws the entire screen by default.
-            let backend_init = || -> std::io::Result<Box<dyn cursive::backend::Backend>> {
-                let backend = cursive::backends::crossterm::Backend::init()?;
-                let buffered_backend = cursive_buffered_backend::BufferedBackend::new(backend);
-                Ok(Box::new(buffered_backend))
-            };
-            siv.try_run_with(backend_init)?;
-            Ok::<(), Error>(())
-        });
-        let result = self.run_backend(tx, cancel.clone()).await;
-        cancel.cancel();
-        if let Err(e) = ui_handle.join() {
-            warn!(err = format!("{:?}", e), "failed to join ui thread");
-        }
-        result
-    }
-
-    pub async fn run_backend(
-        &mut self,
-        tx: Sender<State>,
-        cancel: CancellationToken,
-    ) -> Result<()> {
-        tx.send_async(State::Starting).await?;
-        let mut peer = self.new_peer().await?;
         peer.reset().await?;
 
         let ctrl_c_cancel = cancel.clone();
-        let complete_cancel = cancel.clone();
         let canceller = tokio::spawn(async move {
             tokio::select! {
                 _ = ctrl_c_cancel.cancelled() => {
@@ -268,53 +112,14 @@ impl App {
             Commands::Fetch {
                 dht_key: ref share_key,
                 ref root,
-            } => {
-                tx.send_async(State::ResolvingFetch {
-                    file: root.to_owned(),
-                    dht_key: share_key.to_owned(),
-                })
-                .await?;
-                let fetcher =
-                    Fetcher::from_dht(peer.clone(), share_key.as_str(), root.as_str()).await?;
-                tx.send_async(State::FetchingFile {
-                    file: fetcher.file(),
-                    dht_key: share_key.to_owned(),
-                    sha256: fetcher.digest(),
-                })
-                .await?;
-                fetcher.fetch(cancel).await?;
-                tx.send_async(State::FetchComplete).await?;
-                Ok(())
+            } => self.do_fetch(m, peer, cancel, share_key, root).await,
+            Commands::Seed { ref file } => self.do_seed(m, peer, cancel, file).await,
+            _ => {
+                cancel.cancel();
+                Err(distrans_peer::Error::other("invalid command").into())
             }
-            Commands::Seed { ref file } => {
-                tx.send_async(State::IndexingFile {
-                    file: file.to_owned(),
-                })
-                .await?;
-                let seeder = Seeder::from_file(peer.clone(), file.as_str()).await?;
-                tx.send_async(State::SeedingFile {
-                    file: file.to_owned(),
-                    share_key: seeder.share_key(),
-                    sha256: seeder.digest(),
-                })
-                .await?;
-                seeder.seed(cancel).await
-            }
-            _ => Err(distrans_peer::Error::other("invalid command")),
         };
-        complete_cancel.cancel();
-        if let Err(e) = canceller.await {
-            warn!(err = format!("{}", e), "failed to join canceller task");
-        }
-
-        if let Err(e) = tx.send_async(State::Stopping).await {
-            warn!(err = format!("{}", e), "failed to send state");
-        }
-        peer.shutdown().await?;
-        if let Err(e) = tx.send_async(State::Stopped).await {
-            warn!(err = format!("{}", e), "failed to send state");
-        }
-
+        canceller.await?;
         Ok(result?)
     }
 
@@ -324,147 +129,140 @@ impl App {
         Ok(peer)
     }
 
-    fn theme() -> Theme {
-        Theme {
-            shadow: false,
-            borders: BorderStyle::Simple,
-            palette: Palette::retro().with(|palette| {
-                use cursive::theme::BaseColor::*;
-                use cursive::theme::PaletteColor::*;
-
-                palette[Background] = Black.dark();
-                palette[Shadow] = Black.dark();
-                palette[View] = Black.dark();
-                palette[Primary] = Cyan.light();
-                palette[Secondary] = Cyan.light();
-                palette[Tertiary] = Green.light();
-                palette[TitlePrimary] = Magenta.light();
-                palette[TitleSecondary] = Magenta.light();
-                palette[Highlight] = White.light();
-                palette[HighlightInactive] = White.dark();
-                palette[HighlightText] = Black.dark();
-            }),
-        }
-    }
-
-    fn add_panel(s: &mut CursiveRunnable, log_rx: Receiver<Vec<u8>>) {
-        s.add_layer(
-            Panel::new(
-                LinearLayout::vertical()
-                    .child(AlignedView::with_top_center(
-                        LinearLayout::horizontal()
-                            .child(ThemedView::new(
-                                Self::theme().with(|t| {
-                                    use cursive::theme::BaseColor::*;
-                                    use cursive::theme::PaletteColor::*;
-                                    t.palette[Primary] = Cyan.dark();
-                                }),
-                                LinearLayout::vertical()
-                                    .child(
-                                        TextView::new("Connecting")
-                                            .h_align(HAlign::Left)
-                                            .with_name("mode")
-                                            .min_width(10),
-                                    )
-                                    .child(
-                                        TextView::new("DHT Key")
-                                            .h_align(HAlign::Left)
-                                            .min_width(10),
-                                    )
-                                    .child(
-                                        TextView::new("SHA256").h_align(HAlign::Left).min_width(10),
-                                    ),
-                            ))
-                            .child(
-                                LinearLayout::vertical()
-                                    .child(TextView::new("").with_name("file").min_width(48))
-                                    .child(TextView::new("").with_name("dht_key").min_width(48))
-                                    .child(TextView::new("").with_name("sha256").min_width(64)),
-                            ),
-                    ))
-                    .child(
-                        AlignedView::with_center(
-                            LinearLayout::vertical()
-                                .child(
-                                    TextView::new("")
-                                        .align(Align::center())
-                                        .with_name("qr_code")
-                                        .align_center(),
-                                )
-                                .child(
-                                    TextView::new("")
-                                        .align(Align::center())
-                                        .with_name("share_text")
-                                        .align_center(),
-                                ),
-                        )
-                        .full_screen(),
-                    )
-                    .child(
-                        ScrollView::new(BufferView::new(10, log_rx))
-                            .show_scrollbars(false)
-                            .scroll_x(true)
-                            .scroll_strategy(ScrollStrategy::StickToBottom)
-                            .max_height(5),
-                    )
-                    .child(AlignedView::with_bottom_center(TextView::new(
-                        "Shift+Click to select text. Press 'q' to quit",
-                    )))
-                    .full_screen(),
-            )
-            .title(format!("distrans {}", env!("CARGO_PKG_VERSION")))
-            .title_position(HAlign::Center)
-            .full_screen(),
-        )
-    }
-}
-
-struct BufferView {
-    buffer: VecDeque<String>,
-    rx: Receiver<Vec<u8>>,
-}
-
-impl BufferView {
-    fn new(size: usize, rx: Receiver<Vec<u8>>) -> Self {
-        let mut buffer = VecDeque::new();
-        buffer.resize(size, String::new());
-        BufferView { buffer, rx }
-    }
-
-    fn update(&mut self) -> Vec2 {
-        while let Ok(line_bytes) = self.rx.try_recv() {
-            let line = String::from_utf8_lossy(&line_bytes);
-            self.buffer.push_back(line.into());
-            self.buffer.pop_front();
-        }
-
-        let mut width = 1usize;
-        let mut height = 0usize;
-        for line in self.buffer.iter() {
-            width = max(width, line.len());
-            if !line.is_empty() {
-                height += 1;
+    async fn do_fetch(
+        &self,
+        m: MultiProgress,
+        peer: ResilientPeer<VeilidPeer>,
+        cancel: CancellationToken,
+        share_key: &str,
+        root: &str,
+    ) -> Result<()> {
+        let fetcher = Fetcher::from_dht(peer.clone(), share_key, root).await?;
+        let progress_cancel = cancel.clone();
+        let mut fetch_progress_rx = fetcher.subscribe_fetch_progress();
+        let mut verify_progress_rx = fetcher.subscribe_verify_progress();
+        let fetch_progress_bar = m.add(ProgressBar::new(0u64));
+        fetch_progress_bar.set_style(self.bytes_style.clone());
+        fetch_progress_bar.set_message("Fetching share");
+        let verify_progress_bar = m.add(ProgressBar::new(0u64));
+        verify_progress_bar.set_style(self.bar_style.clone());
+        verify_progress_bar.set_message("Verifying share");
+        spawn(async move {
+            loop {
+                select! {
+                    _ = progress_cancel.cancelled() => {
+                        return Ok::<(), Error>(())
+                    }
+                    fetch_result = fetch_progress_rx.changed() => {
+                        fetch_result?;
+                        let fetch_progress = fetch_progress_rx.borrow();
+                        fetch_progress_bar.update(|pb| {
+                            pb.set_len(fetch_progress.length);
+                            pb.set_pos(fetch_progress.position);
+                        });
+                        if fetch_progress.position == fetch_progress.length {
+                            fetch_progress_bar.finish_with_message("Fetch complete");
+                        }
+                    }
+                    verify_result = verify_progress_rx.changed() => {
+                        verify_result?;
+                        let verify_progress = verify_progress_rx.borrow();
+                        verify_progress_bar.update(|pb| {
+                            pb.set_len(verify_progress.length);
+                            pb.set_pos(verify_progress.position);
+                        });
+                        if verify_progress.position == verify_progress.length {
+                            verify_progress_bar.finish_with_message("Verified");
+                        }
+                    }
+                }
             }
-        }
-        XY::new(width, height)
-    }
-}
+        });
+        let fetch_progress = m.add(
+            ProgressBar::new(0u64)
+                .with_style(self.spinner_style.clone())
+                .with_prefix("⇊"),
+        );
+        fetch_progress.enable_steady_tick(Duration::from_millis(250));
+        fetch_progress.set_message("Fetching share");
 
-impl View for BufferView {
-    fn layout(&mut self, _: Vec2) {
-        self.update();
+        fetcher.fetch(cancel.clone()).await?;
+        fetch_progress.finish_with_message("✅ Fetch complete");
+
+        cancel.cancel();
+        peer.shutdown().await?;
+
+        let _ = m.println("✅ Fetch complete");
+        Ok(())
     }
 
-    fn required_size(&mut self, _: Vec2) -> Vec2 {
-        self.update()
-    }
+    async fn do_seed(
+        &self,
+        m: MultiProgress,
+        peer: ResilientPeer<VeilidPeer>,
+        cancel: CancellationToken,
+        file: &str,
+    ) -> Result<()> {
+        let indexer = Indexer::from_file(file.into()).await?;
 
-    fn draw(&self, printer: &cursive::Printer) {
-        for (i, line) in self.buffer.iter().rev().take(printer.size.y).enumerate() {
-            printer.print_styled(
-                (0, printer.size.y - 1 - i),
-                &cursive::utils::markup::ansi::parse(line),
-            );
-        }
+        let progress_cancel = cancel.clone();
+        let mut index_progress_rx = indexer.subscribe_index_progress();
+        let mut digest_progress_rx = indexer.subscribe_digest_progress();
+        let index_progress_bar = m.add(ProgressBar::new(0u64));
+        index_progress_bar.set_style(self.bytes_style.clone());
+        index_progress_bar.set_message("Indexing share");
+        let digest_progress_bar = m.add(ProgressBar::new(0u64));
+        digest_progress_bar.set_style(self.bytes_style.clone());
+        digest_progress_bar.set_message("Calculating content digest");
+        let index_multi_bar = m.clone();
+        spawn(async move {
+            loop {
+                select! {
+                    _ = progress_cancel.cancelled() => {
+                        return Ok::<(), Error>(())
+                    }
+                    index_result = index_progress_rx.changed() => {
+                        index_result?;
+                        let index_progress = index_progress_rx.borrow();
+                        index_progress_bar.update(|pb| {
+                            pb.set_len(index_progress.length);
+                            pb.set_pos(index_progress.position);
+                        });
+                        if index_progress.position == index_progress.length {
+                            index_progress_bar.finish_with_message("Indexed");
+                            index_multi_bar.remove(&index_progress_bar);
+                        }
+                    }
+                    digest_result = digest_progress_rx.changed() => {
+                        digest_result?;
+                        let digest_progress = digest_progress_rx.borrow();
+                        digest_progress_bar.update(|pb| {
+                            pb.set_len(digest_progress.length);
+                            pb.set_pos(digest_progress.position);
+                        });
+                        if digest_progress.position == digest_progress.length {
+                            digest_progress_bar.finish_with_message("Digest complete");
+                            index_multi_bar.remove(&digest_progress_bar);
+                        }
+                    }
+                }
+            }
+        });
+
+        let seeder = Seeder::new(peer.clone(), indexer.index().await?).await?;
+        let share_key = seeder.share_key();
+        let seed_progress = m.add(
+            ProgressBar::new(0u64)
+                .with_style(self.msg_style.clone())
+                .with_prefix("🌱"),
+        );
+        seed_progress.set_message(format!("Seeding {}", share_key));
+        seeder.seed(cancel.clone()).await?;
+        seed_progress.finish();
+
+        cancel.cancel();
+        peer.shutdown().await?;
+
+        Ok(())
     }
 }

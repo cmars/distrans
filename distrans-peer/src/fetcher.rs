@@ -8,9 +8,10 @@ use flume::{unbounded, Receiver, Sender};
 use sha2::{Digest, Sha256};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
+use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument, trace, warn};
 use veilid_core::{FromStr, Target, TypedKey};
 
 use crate::peer::{Peer, ShareKey};
@@ -24,6 +25,23 @@ pub struct Fetcher<P: Peer> {
     share_key: ShareKey,
     route: Arc<Mutex<(Target, Header)>>,
     index: Index,
+    fetch_progress_tx: watch::Sender<Progress>,
+    verify_progress_tx: watch::Sender<Progress>,
+}
+
+#[derive(Clone)]
+pub struct Progress {
+    pub length: u64,
+    pub position: u64,
+}
+
+impl Default for Progress {
+    fn default() -> Self {
+        Progress {
+            length: 0u64,
+            position: 0u64,
+        }
+    }
 }
 
 impl<P: Peer> Clone for Fetcher<P> {
@@ -33,6 +51,8 @@ impl<P: Peer> Clone for Fetcher<P> {
             share_key: self.share_key.clone(),
             route: Arc::clone(&self.route),
             index: self.index.clone(),
+            fetch_progress_tx: self.fetch_progress_tx.clone(),
+            verify_progress_tx: self.verify_progress_tx.clone(),
         }
     }
 }
@@ -42,13 +62,31 @@ impl<P: Peer + 'static> Fetcher<P> {
         let share_key = TypedKey::from_str(share_key_str)?;
         let root_path_buf = PathBuf::from_str(root).unwrap();
         let (target, header, index) = peer.resolve(&share_key, &root_path_buf).await?;
+        let (fetch_progress_tx, _) = watch::channel(Progress {
+            length: index.payload().length() as u64,
+            position: 0u64,
+        });
+        let (verify_progress_tx, _) = watch::channel(Progress {
+            length: index.payload().pieces().len() as u64,
+            position: 0u64,
+        });
 
         Ok(Fetcher {
             peer,
             share_key,
             route: Arc::new(Mutex::new((target, header))),
             index,
+            fetch_progress_tx,
+            verify_progress_tx,
         })
+    }
+
+    pub fn subscribe_fetch_progress(&self) -> watch::Receiver<Progress> {
+        self.fetch_progress_tx.subscribe()
+    }
+
+    pub fn subscribe_verify_progress(&self) -> watch::Receiver<Progress> {
+        self.verify_progress_tx.subscribe()
     }
 
     pub fn file(&self) -> String {
@@ -82,6 +120,7 @@ impl<P: Peer + 'static> Fetcher<P> {
             done.clone(),
             fetch_block_sender.clone(),
             verify_receiver,
+            self.verify_progress_tx.clone(),
         ));
         for i in 0..N_FETCHERS {
             tasks.spawn(self.clone().fetch_blocks(
@@ -134,11 +173,11 @@ impl<P: Peer + 'static> Fetcher<P> {
                         Ok(fetch) => fetch,
                         Err(e) => {
                             // This is practically impossible given we have a sender in scope here for retries...
-                            debug!(err = format!("{}", e), "all fetch block senders have been dropped");
+                            warn!(err = format!("{}", e), "all fetch block senders have been dropped");
                             return Ok(())
                         }
                     };
-                    debug!(task_id, fetch = format!("{:?}", fetch));
+                    trace!(task_id, fetch = format!("{:?}", fetch));
                     let fetch_result: Result<()> = async {
                         let fh = match fh_map.get_mut(&fetch.file_index) {
                             Some(fh) => fh,
@@ -168,6 +207,9 @@ impl<P: Peer + 'static> Fetcher<P> {
 
                         let block_end = min(block.len(), BLOCK_SIZE_BYTES);
                         fh.write_all(block[fetch.piece_offset..block_end].as_mut()).await?;
+                        self.fetch_progress_tx.send_modify(|p| {
+                            p.position += block_end as u64;
+                        });
                         verify_sender.send_async(PieceState::new(
                             fetch.file_index,
                             fetch.piece_index,
@@ -241,6 +283,7 @@ impl<P: Peer + 'static> Fetcher<P> {
         done: CancellationToken,
         fetch_block_sender: Sender<FileBlockFetch>,
         verify_receiver: Receiver<PieceState>,
+        verify_progress_tx: watch::Sender<Progress>,
     ) -> Result<()> {
         let mut piece_states: HashMap<(usize, usize), PieceState> = HashMap::new();
         let mut verified_pieces = 0;
@@ -251,7 +294,7 @@ impl<P: Peer + 'static> Fetcher<P> {
                     let mut to_verify = match recv_verify {
                         Ok(verify) => verify,
                         Err(e) => {
-                            debug!(err = format!("{}", e), "all verify senders have been dropped");
+                            trace!(err = format!("{}", e), "all verify senders have been dropped");
                             return Ok(())
                         }
                     };
@@ -265,10 +308,13 @@ impl<P: Peer + 'static> Fetcher<P> {
                     if to_verify.is_complete() {
                         // verify complete ones
                         if Self::verify_piece(&index, to_verify.file_index, to_verify.piece_index).await? {
-                            debug!(file_index = to_verify.file_index, piece_index = to_verify.piece_index, "digest verified");
+                            trace!(file_index = to_verify.file_index, piece_index = to_verify.piece_index, "digest verified");
                             verified_pieces += 1;
+                            verify_progress_tx.send_modify(|p| {
+                                p.position += 1;
+                            });
                             if verified_pieces == index.payload().pieces().len() {
-                                info!("all pieces validated");
+                                info!("all pieces verified");
                                 done.cancel();
                                 return Ok(())
                             }
@@ -406,6 +452,7 @@ impl PieceState {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use distrans_fileindex::Indexer;
     use veilid_core::{VeilidStateAttachment, VeilidUpdate};
 
     use crate::{
@@ -419,9 +466,10 @@ mod tests {
     #[tokio::test]
     async fn from_dht_ok() {
         let tf = temp_file(0xa5u8, 1048576);
-        let index = Index::from_file(std::env::temp_dir().join(tf.path()).into())
+        let indexer = Indexer::from_file(std::env::temp_dir().join(tf.path()).into())
             .await
-            .expect("index");
+            .expect("indexer");
+        let index = indexer.index().await.expect("index");
 
         let mut stub_peer = StubPeer::new();
         let update_tx = stub_peer.update_tx.clone();

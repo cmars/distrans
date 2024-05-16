@@ -56,3 +56,4 @@ pub use veilid_peer::VeilidPeer;
 
 mod resilient_peer;
 pub use resilient_peer::ResilientPeer;
+pub use resilient_peer::State as PeerState;

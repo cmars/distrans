@@ -263,6 +263,7 @@ pub fn decode_block_request(buf: &[u8]) -> Result<BlockRequest> {
 mod tests {
     use super::*;
 
+    use distrans_fileindex::Indexer;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -289,9 +290,10 @@ mod tests {
     #[tokio::test]
     async fn round_trip_index() {
         let tempf = temp_file(b'@', 4194304);
-        let idx = Index::from_file(tempf.path().to_owned())
+        let indexer = Indexer::from_file(tempf.path().to_owned())
             .await
-            .expect("index file");
+            .expect("indexer");
+        let idx = indexer.index().await.expect("index");
         let header = Header::new(
             idx.payload().digest().try_into().expect("digest fits"),
             idx.payload().length(),

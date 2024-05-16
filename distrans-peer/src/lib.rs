@@ -12,7 +12,7 @@ use veilid_core::{RoutingContext, Sequencing, VeilidUpdate};
 
 pub use error::{Error, Result};
 pub use fetcher::Fetcher;
-pub use peer::{Peer, ResilientPeer, VeilidPeer};
+pub use peer::{Peer, PeerState, ResilientPeer, VeilidPeer};
 pub use seeder::Seeder;
 
 #[cfg(test)]
