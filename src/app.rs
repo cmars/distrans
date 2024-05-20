@@ -186,13 +186,20 @@ impl App {
         fetch_progress.enable_steady_tick(Duration::from_millis(250));
         fetch_progress.set_message("Fetching share");
 
-        fetcher.fetch(cancel.clone()).await?;
-        fetch_progress.finish_with_message("✅ Fetch complete");
+        let fetch_result = fetcher.fetch(cancel.clone()).await;
+        let msg = match fetch_result {
+            Ok(()) => "✅ Fetch complete",
+            Err(distrans_peer::Error::Fault(distrans_peer::Unexpected::Cancelled)) => {
+                "❌ Fetch cancelled"
+            }
+            Err(_) => "❌ Fetch failed",
+        };
+        fetch_progress.finish_with_message(msg);
 
         cancel.cancel();
         peer.shutdown().await?;
 
-        let _ = m.println("✅ Fetch complete");
+        let _ = m.println(msg);
         Ok(())
     }
 

@@ -10,7 +10,7 @@ use std::{path::PathBuf, sync::Arc};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use veilid_core::{RoutingContext, Sequencing, VeilidUpdate};
 
-pub use error::{Error, Result};
+pub use error::{Error, Result, Unexpected};
 pub use fetcher::Fetcher;
 pub use peer::{Peer, PeerState, ResilientPeer, VeilidPeer};
 pub use seeder::Seeder;

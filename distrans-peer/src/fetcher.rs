@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument, trace, warn};
 use veilid_core::{FromStr, Target, TypedKey};
 
+use crate::error::Unexpected;
 use crate::peer::{Peer, ShareKey};
 use crate::proto::Header;
 use crate::{Error, Result};
@@ -137,7 +138,10 @@ impl<P: Peer + 'static> Fetcher<P> {
             match join_res {
                 Ok(res) => {
                     if let Err(e) = res {
-                        warn!(err = format!("{}", e));
+                        if let Error::Fault(Unexpected::Cancelled) = e {
+                        } else {
+                            warn!(err = format!("{}", e));
+                        }
                         if let Ok(_) = result {
                             result = Err(e);
                         }
@@ -215,19 +219,23 @@ impl<P: Peer + 'static> Fetcher<P> {
                             fetch.piece_index,
                             fetch.piece_offset,
                             self.index.payload().pieces()[fetch.piece_index].block_count(),
-                            fetch.block_index)).await.map_err(Error::other)?;
+                            fetch.block_index)).await.map_err(Error::cancelled)?;
                         Ok(())
                     }.await;
-                    if let Err(e) = fetch_result {
-                        warn!(err = format!("{}", e), "fetch block failed, queued for retry");
-                        fetch_block_sender.send_async(fetch).await.map_err(Error::other)?;
-                    }
+                    match fetch_result {
+                        Ok(()) => {}
+                        Err(Error::Fault(Unexpected::Cancelled)) => return fetch_result,
+                        Err(e) => {
+                            warn!(err = format!("{}", e), "fetch block failed, queued for retry");
+                            fetch_block_sender.send_async(fetch).await.map_err(Error::cancelled)?;
+                        }
+                    };
                 }
                 _ = done.cancelled() => {
                     return Ok(())
                 }
                 _ = cancel.cancelled() => {
-                    return Err(Error::other("cancelled"))
+                    return Err(Error::Fault(Unexpected::Cancelled))
                 }
             }
         }
@@ -264,7 +272,7 @@ impl<P: Peer + 'static> Fetcher<P> {
                         piece_offset,
                         block_index,
                     })
-                    .map_err(Error::other)?;
+                    .map_err(Error::cancelled)?;
                 pos += BLOCK_SIZE_BYTES - piece_offset;
                 piece_offset = 0;
                 block_index += 1;
@@ -333,13 +341,13 @@ impl<P: Peer + 'static> Fetcher<P> {
                                     piece_index: to_verify.piece_index,
                                     piece_offset: to_verify.piece_offset,
                                     block_index,
-                                }).await.map_err(Error::other)?;
+                                }).await.map_err(Error::cancelled)?;
                             }
                         }
                     }
                 }
                 _ = cancel.cancelled() => {
-                    return Err(Error::other("cancelled"))
+                    return Err(Error::Fault(Unexpected::Cancelled))
                 }
             }
         }
