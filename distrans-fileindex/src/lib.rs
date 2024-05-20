@@ -144,7 +144,7 @@ impl Indexer {
         let mut payload = PayloadSpec::default();
 
         let (task_tx, task_rx) = unbounded::<Option<ScanTask>>();
-        let (result_tx, result_rx) = unbounded::<Option<ScanResult>>();
+        let (result_tx, result_rx) = unbounded::<ScanResult>();
         let mut scanners = JoinSet::new();
 
         let n_tasks = file_meta.len() as usize / INDEX_BUFFER_SIZE
@@ -205,15 +205,7 @@ impl Indexer {
         loop {
             select! {
                 recv_result = result_rx.recv_async() => {
-                    let scan_result = match recv_result.map_err(other_err)?{
-                        None => {
-                            if result_rx.is_empty() {
-                                break;
-                            }
-                            continue;
-                        }
-                        Some(sr) => sr,
-                    };
+                    let scan_result = recv_result.map_err(other_err)?;
                     self.index_progress_tx.send_modify(|p| {
                         p.length = file_meta.len() as u64;
                         p.position += scan_result.piece.length as u64;
@@ -255,14 +247,13 @@ impl Indexer {
     async fn scan(
         task_tx: Sender<Option<ScanTask>>,
         task_rx: Receiver<Option<ScanTask>>,
-        result_tx: Sender<Option<ScanResult>>,
+        result_tx: Sender<ScanResult>,
     ) -> Result<()> {
         loop {
             match task_rx.recv_async().await {
                 Ok(None) => {
                     // Create a tombstones on channels to wake the next receiver.
                     task_tx.send_async(None).await.map_err(other_err)?;
-                    result_tx.send_async(None).await.map_err(other_err)?;
                     return Ok(());
                 }
                 Ok(Some(mut scan_task)) => {
@@ -300,10 +291,7 @@ impl Indexer {
                         };
                         piece.digest = piece_digest.finalize().into();
                         let scan_result = ScanResult { piece_index, piece };
-                        result_tx
-                            .send_async(Some(scan_result))
-                            .await
-                            .map_err(other_err)?;
+                        result_tx.send_async(scan_result).await.map_err(other_err)?;
                         offset += PIECE_SIZE_BYTES;
                     }
                 }

@@ -181,7 +181,7 @@ impl App {
         let fetch_progress = m.add(
             ProgressBar::new(0u64)
                 .with_style(self.spinner_style.clone())
-                .with_prefix("⇊"),
+                .with_prefix("📥"),
         );
         fetch_progress.enable_steady_tick(Duration::from_millis(250));
         fetch_progress.set_message("Fetching share");
