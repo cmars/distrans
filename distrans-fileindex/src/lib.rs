@@ -5,8 +5,13 @@ use std::{
 
 use flume::{unbounded, Receiver, Sender};
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio::{fs::File, task::JoinSet};
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncSeekExt},
+    select, spawn,
+    sync::watch,
+    task::JoinSet,
+};
 
 pub use crate::error::{other_err, Error, Result};
 
@@ -44,9 +49,34 @@ impl Index {
     pub fn files(&self) -> &Vec<FileSpec> {
         return &self.files;
     }
+}
 
+#[derive(Clone)]
+pub struct Progress {
+    pub length: u64,
+    pub position: u64,
+}
+
+impl Default for Progress {
+    fn default() -> Self {
+        Progress {
+            length: 0u64,
+            position: 0u64,
+        }
+    }
+}
+
+pub struct Indexer {
+    root_dir: PathBuf,
+    files: Vec<PathBuf>,
+
+    digest_progress_tx: watch::Sender<Progress>,
+    index_progress_tx: watch::Sender<Progress>,
+}
+
+impl Indexer {
     /// from_file is used to index a complete local file on disk.
-    pub async fn from_file(file: PathBuf) -> Result<Index> {
+    pub async fn from_file(file: PathBuf) -> Result<Indexer> {
         match file.try_exists() {
             Ok(true) => {}
             Ok(false) => {
@@ -63,17 +93,40 @@ impl Index {
             .parent()
             .ok_or(other_err("cannot resolve parent directory"))?;
 
-        // payload is built from the given file
-        let payload = PayloadSpec::from_file(&resolved_file).await?;
+        let (digest_progress_tx, _) = watch::channel(Progress::default());
+        let (index_progress_tx, _) = watch::channel(Progress::default());
+
+        Ok(Indexer {
+            root_dir: root_dir.to_path_buf(),
+            files: vec![resolved_file],
+            digest_progress_tx,
+            index_progress_tx,
+        })
+    }
+
+    pub fn subscribe_digest_progress(&self) -> watch::Receiver<Progress> {
+        self.digest_progress_tx.subscribe()
+    }
+
+    pub fn subscribe_index_progress(&self) -> watch::Receiver<Progress> {
+        self.index_progress_tx.subscribe()
+    }
+
+    pub async fn index(&self) -> Result<Index> {
+        if self.files.len() != 1 {
+            unimplemented!("number of files != 1");
+        }
+        let resolved_file = self.files[0].to_owned();
+        let payload = self.index_spec(&resolved_file).await?;
         let length = payload.length;
 
         // files is the file given
         Ok(Index {
-            root: root_dir.into(),
+            root: self.root_dir.to_owned().into(),
             payload,
             files: vec![FileSpec {
                 path: resolved_file
-                    .strip_prefix(root_dir)
+                    .strip_prefix(&self.root_dir)
                     .map_err(other_err)?
                     .to_owned(),
                 contents: PayloadSlice {
@@ -85,20 +138,177 @@ impl Index {
         })
     }
 
-    /// from_files is used to index a local subdirectory tree of files on disk.
-    /// Empty folders are ignored; only files are indexed.
-    pub fn from_files(_root: PathBuf) -> Index {
-        unimplemented!()
+    async fn index_spec(&self, file: impl AsRef<Path>) -> Result<PayloadSpec> {
+        let mut fh = File::open(file.as_ref()).await?;
+        let file_meta = fh.metadata().await?;
+        let mut payload = PayloadSpec::default();
+
+        let (task_tx, task_rx) = unbounded::<Option<ScanTask>>();
+        let (result_tx, result_rx) = unbounded::<Option<ScanResult>>();
+        let mut scanners = JoinSet::new();
+
+        let n_tasks = file_meta.len() as usize / INDEX_BUFFER_SIZE
+            + if file_meta.len() as usize % INDEX_BUFFER_SIZE > 0 {
+                1
+            } else {
+                0
+            };
+
+        for scan_index in 0..n_tasks {
+            let scan_task = ScanTask {
+                offset: scan_index * INDEX_BUFFER_SIZE,
+                fh: File::open(file.as_ref()).await?,
+            };
+            task_tx
+                .send_async(Some(scan_task))
+                .await
+                .map_err(other_err)?;
+        }
+        task_tx.send_async(None).await.map_err(other_err)?;
+
+        for _ in 0..n_tasks {
+            scanners.spawn(Self::scan(
+                task_tx.clone(),
+                task_rx.clone(),
+                result_tx.clone(),
+            ));
+        }
+
+        let digest_progress_tx = self.digest_progress_tx.clone();
+        let file_len = file_meta.len();
+        let digest_task = spawn(async move {
+            let mut buf = vec![0; INDEX_BUFFER_SIZE];
+            let mut payload_digest = Sha256::new();
+            loop {
+                let mut total_rd = 0;
+                while total_rd < INDEX_BUFFER_SIZE {
+                    let rd = fh.read(&mut buf[total_rd..INDEX_BUFFER_SIZE]).await?;
+                    if rd == 0 {
+                        break;
+                    }
+                    total_rd += rd;
+
+                    digest_progress_tx.send_modify(|p| {
+                        p.length = file_len;
+                        p.position += rd as u64;
+                    });
+                }
+                if total_rd == 0 {
+                    break;
+                }
+                payload_digest.update(&buf[..total_rd]);
+            }
+            Ok::<[u8; 32], Error>(payload_digest.finalize().into())
+        });
+
+        let mut scan_results: Vec<ScanResult> = vec![];
+        loop {
+            select! {
+                recv_result = result_rx.recv_async() => {
+                    let scan_result = match recv_result.map_err(other_err)?{
+                        None => {
+                            if result_rx.is_empty() {
+                                break;
+                            }
+                            continue;
+                        }
+                        Some(sr) => sr,
+                    };
+                    self.index_progress_tx.send_modify(|p| {
+                        p.length = file_meta.len() as u64;
+                        p.position += scan_result.piece.length as u64;
+                    });
+                    scan_results.push(scan_result);
+                }
+                joined = scanners.join_next() => {
+                    match joined {
+                        None => {
+                            if result_rx.is_empty() {
+                                break;
+                            }
+                        }
+                        Some(Err(e)) => return Err(other_err(e)),
+                        Some(Ok(Err(e))) => return Err(other_err(e)),
+                        _ => continue,
+                    }
+                }
+            }
+        }
+
+        // Task and result channels should be empty. Dropping them defensively
+        // to force any unexpected receive still running to error noisily.
+        drop(task_tx);
+        drop(result_tx);
+
+        scan_results.sort_by_key(|r| r.piece_index);
+        payload.pieces = scan_results.drain(..).map(|r| r.piece).collect();
+        if payload.pieces.len() > 0 {
+            payload.length = (payload.pieces.len() - 1) * PIECE_SIZE_BYTES;
+            payload.length += payload.pieces[payload.pieces.len() - 1].length;
+        }
+
+        let payload_digest = digest_task.await.map_err(other_err)??;
+        payload.digest = payload_digest;
+        Ok(payload)
     }
 
-    /// from_specs is used to build an index of a file from a remote
-    /// specification. This constructor is used to create an index to build the
-    /// local files from an incomplete or missing download.
-    pub fn from_specs(root: PathBuf, payload: PayloadSpec, files: Vec<FileSpec>) -> Index {
-        Index {
-            root,
-            files,
-            payload,
+    async fn scan(
+        task_tx: Sender<Option<ScanTask>>,
+        task_rx: Receiver<Option<ScanTask>>,
+        result_tx: Sender<Option<ScanResult>>,
+    ) -> Result<()> {
+        loop {
+            match task_rx.recv_async().await {
+                Ok(None) => {
+                    // Create a tombstones on channels to wake the next receiver.
+                    task_tx.send_async(None).await.map_err(other_err)?;
+                    result_tx.send_async(None).await.map_err(other_err)?;
+                    return Ok(());
+                }
+                Ok(Some(mut scan_task)) => {
+                    scan_task
+                        .fh
+                        .seek(std::io::SeekFrom::Start(
+                            scan_task.offset.try_into().map_err(other_err)?,
+                        ))
+                        .await?;
+                    let mut total_rd = 0;
+                    let mut buf = vec![0u8; INDEX_BUFFER_SIZE];
+                    while total_rd < INDEX_BUFFER_SIZE {
+                        let rd = scan_task
+                            .fh
+                            .read(&mut buf[total_rd..INDEX_BUFFER_SIZE])
+                            .await?;
+                        if rd == 0 {
+                            break;
+                        }
+                        total_rd += rd;
+                    }
+                    if total_rd == 0 {
+                        return Ok(());
+                    }
+
+                    let mut offset = 0;
+                    while offset < total_rd {
+                        let piece_index = (scan_task.offset + offset) / PIECE_SIZE_BYTES;
+                        let piece_length = min(PIECE_SIZE_BYTES, total_rd - offset);
+                        let mut piece_digest = Sha256::new();
+                        piece_digest.update(&buf[offset..offset + piece_length]);
+                        let mut piece = PayloadPiece {
+                            digest: [0u8; 32],
+                            length: piece_length,
+                        };
+                        piece.digest = piece_digest.finalize().into();
+                        let scan_result = ScanResult { piece_index, piece };
+                        result_tx
+                            .send_async(Some(scan_result))
+                            .await
+                            .map_err(other_err)?;
+                        offset += PIECE_SIZE_BYTES;
+                    }
+                }
+                Err(e) => return Err(other_err(e)),
+            };
         }
     }
 }
@@ -202,125 +412,6 @@ impl PayloadSpec {
     pub fn pieces(&self) -> &Vec<PayloadPiece> {
         &self.pieces
     }
-
-    pub async fn from_file(file: impl AsRef<Path>) -> Result<PayloadSpec> {
-        let mut fh = File::open(file.as_ref()).await?;
-        let file_meta = fh.metadata().await?;
-        let mut payload = PayloadSpec::default();
-
-        let (task_sender, task_receiver) = unbounded::<Option<ScanTask>>();
-        let (result_sender, result_receiver) = unbounded::<ScanResult>();
-        let mut scanners = JoinSet::new();
-
-        let n_tasks = file_meta.len() as usize / INDEX_BUFFER_SIZE
-            + if file_meta.len() as usize % INDEX_BUFFER_SIZE > 0 {
-                1
-            } else {
-                0
-            };
-        for _ in 0..n_tasks {
-            scanners.spawn(Self::scan(task_receiver.clone(), result_sender.clone()));
-        }
-
-        for scan_index in 0..n_tasks {
-            let scan_task = ScanTask {
-                offset: scan_index * INDEX_BUFFER_SIZE,
-                fh: File::open(file.as_ref()).await?,
-            };
-            task_sender
-                .send_async(Some(scan_task))
-                .await
-                .map_err(other_err)?;
-        }
-
-        let mut buf = vec![0; INDEX_BUFFER_SIZE];
-        let mut payload_digest = Sha256::new();
-        loop {
-            let mut total_rd = 0;
-            while total_rd < INDEX_BUFFER_SIZE {
-                let rd = fh.read(&mut buf[total_rd..INDEX_BUFFER_SIZE]).await?;
-                if rd == 0 {
-                    break;
-                }
-                total_rd += rd;
-            }
-            if total_rd == 0 {
-                break;
-            }
-            payload_digest.update(&buf[..total_rd]);
-        }
-        drop(buf);
-        payload.digest = payload_digest.finalize().into();
-
-        loop {
-            task_sender.send_async(None).await.map_err(other_err)?;
-            match scanners.join_next().await {
-                None => break,
-                Some(Err(e)) => return Err(other_err(e)),
-                Some(Ok(Err(e))) => return Err(other_err(e)),
-                Some(Ok(Ok(()))) => {}
-            }
-        }
-        drop(task_sender);
-
-        let mut scan_result: Vec<ScanResult> = result_receiver.drain().collect();
-        scan_result.sort_by_key(|r| r.piece_index);
-        payload.pieces = scan_result.drain(..).map(|r| r.piece).collect();
-        if payload.pieces.len() > 0 {
-            payload.length = (payload.pieces.len() - 1) * PIECE_SIZE_BYTES;
-            payload.length += payload.pieces[payload.pieces.len() - 1].length;
-        }
-        //payload_digest.result(&mut payload.digest[..]);
-        Ok(payload)
-    }
-
-    async fn scan(receiver: Receiver<Option<ScanTask>>, sender: Sender<ScanResult>) -> Result<()> {
-        loop {
-            match receiver.recv_async().await {
-                Ok(None) => return Ok(()),
-                Ok(Some(mut scan_task)) => {
-                    scan_task
-                        .fh
-                        .seek(std::io::SeekFrom::Start(
-                            scan_task.offset.try_into().map_err(other_err)?,
-                        ))
-                        .await?;
-                    let mut total_rd = 0;
-                    let mut buf = vec![0u8; INDEX_BUFFER_SIZE];
-                    while total_rd < INDEX_BUFFER_SIZE {
-                        let rd = scan_task
-                            .fh
-                            .read(&mut buf[total_rd..INDEX_BUFFER_SIZE])
-                            .await?;
-                        if rd == 0 {
-                            break;
-                        }
-                        total_rd += rd;
-                    }
-                    if total_rd == 0 {
-                        return Ok(());
-                    }
-
-                    let mut offset = 0;
-                    while offset < total_rd {
-                        let piece_index = (scan_task.offset + offset) / PIECE_SIZE_BYTES;
-                        let piece_length = min(PIECE_SIZE_BYTES, total_rd - offset);
-                        let mut piece_digest = Sha256::new();
-                        piece_digest.update(&buf[offset..offset + piece_length]);
-                        let mut piece = PayloadPiece {
-                            digest: [0u8; 32],
-                            length: piece_length,
-                        };
-                        piece.digest = piece_digest.finalize().into();
-                        let scan_result = ScanResult { piece_index, piece };
-                        sender.send_async(scan_result).await.map_err(other_err)?;
-                        offset += PIECE_SIZE_BYTES;
-                    }
-                }
-                Err(e) => return Err(other_err(e)),
-            };
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -398,9 +489,10 @@ mod tests {
     async fn single_file_index() {
         let tempf = temp_file(b'.', 1049600);
 
-        let index = Index::from_file(tempf.path().into())
+        let indexer = Indexer::from_file(tempf.path().into())
             .await
             .expect("Index::from_file");
+        let index = indexer.index().await.expect("index");
 
         assert_eq!(
             index.root().to_owned(),
@@ -445,9 +537,10 @@ mod tests {
     async fn empty_file_index() {
         let tempf = temp_file(b'.', 0);
 
-        let index = Index::from_file(tempf.path().into())
+        let indexer = Indexer::from_file(tempf.path().into())
             .await
             .expect("Index::from_file");
+        let index = indexer.index().await.expect("index");
 
         assert_eq!(
             index.root().to_owned(),
@@ -479,9 +572,10 @@ mod tests {
     async fn large_file_index() {
         let tempf = temp_file(b'.', 134217728);
 
-        let index = Index::from_file(tempf.path().into())
+        let indexer = Indexer::from_file(tempf.path().into())
             .await
             .expect("Index::from_file");
+        let index = indexer.index().await.expect("index");
 
         assert_eq!(
             index.root().to_owned(),

@@ -1,14 +1,19 @@
+use indicatif::MultiProgress;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
 pub mod app;
 pub mod cli;
 
 pub use app::App;
 pub use cli::Cli;
-use flume::Sender;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 pub fn initialize_stderr_logging() {
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(std::io::stdout))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(std::io::stdout),
+        )
         .with(
             EnvFilter::builder()
                 .with_default_directive("distrans=debug".parse().unwrap())
@@ -17,8 +22,8 @@ pub fn initialize_stderr_logging() {
         .init();
 }
 
-pub fn initialize_ui_logging(sender: Sender<Vec<u8>>) {
-    let writer = ChannelWriter::new(sender);
+pub fn initialize_ui_logging(multi_progress: MultiProgress) {
+    let writer = ChannelWriter::new(multi_progress);
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_writer(move || writer.clone()))
         .with(
@@ -31,18 +36,20 @@ pub fn initialize_ui_logging(sender: Sender<Vec<u8>>) {
 
 #[derive(Clone)]
 struct ChannelWriter {
-    sender: Sender<Vec<u8>>,
+    multi_progress: MultiProgress,
 }
 
 impl ChannelWriter {
-    fn new(sender: Sender<Vec<u8>>) -> Self {
-        ChannelWriter { sender }
+    fn new(multi_progress: MultiProgress) -> Self {
+        ChannelWriter { multi_progress }
     }
 }
 
 impl std::io::Write for ChannelWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.sender.send(buf.to_vec()).map_err(|e| std::io::Error::other(e))?;
+        if let Ok(msg) = std::str::from_utf8(buf) {
+            let _ = self.multi_progress.println(msg);
+        }
         Ok(buf.len())
     }
 

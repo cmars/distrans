@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument};
 use veilid_core::{Target, VeilidAPIError, VeilidUpdate};
 
-use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
+use distrans_fileindex::{Index, Indexer, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
 
 use crate::proto::Header;
 use crate::{
@@ -29,18 +29,7 @@ pub struct Seeder<P: Peer> {
 }
 
 impl<P: Peer> Seeder<P> {
-    #[instrument(skip(peer), level = "debug", err)]
-    pub async fn from_file(mut peer: P, file: &str) -> Result<Seeder<P>> {
-        // Derive root directory
-        let file_path_buf: PathBuf = PathBuf::from(file);
-        let abs_file = file_path_buf.absolutize()?;
-
-        // Build an index of the content to be shared
-        info!(path = format!("{:?}", file_path_buf), "indexing file");
-        let index = Index::from_file(abs_file.into())
-            .await
-            .map_err(Error::index)?;
-
+    pub async fn new(mut peer: P, index: Index) -> Result<Seeder<P>> {
         let (share_key, target, header) = peer.announce(&index).await?;
         Ok(Seeder {
             peer,
@@ -49,6 +38,22 @@ impl<P: Peer> Seeder<P> {
             target,
             header,
         })
+    }
+
+    #[deprecated = "use new(peer, index) instead"]
+    #[instrument(skip(peer), level = "debug", err)]
+    pub async fn from_file(peer: P, file: &str) -> Result<Seeder<P>> {
+        // Derive root directory
+        let file_path_buf: PathBuf = PathBuf::from(file);
+        let abs_file = file_path_buf.absolutize()?;
+
+        // Build an index of the content to be shared
+        info!(path = format!("{:?}", file_path_buf), "indexing file");
+        let indexer = Indexer::from_file(abs_file.into())
+            .await
+            .map_err(Error::index)?;
+        let index = indexer.index().await.map_err(Error::index)?;
+        Self::new(peer, index).await
     }
 
     pub fn share_key(&self) -> String {
@@ -197,9 +202,10 @@ mod tests {
         // Temp file to seed, index it, create a stub key for target and share
         let tf = temp_file(0xa5u8, 1048576);
         let tf_path = std::env::temp_dir().join(tf.path()).to_owned();
-        let announce_index = Index::from_file(tf_path.clone().into())
+        let announce_indexer = Indexer::from_file(tf_path.clone().into())
             .await
             .expect("index");
+        let announce_index = announce_indexer.index().await.expect("index");
         let key = TypedKey::from_str("VLD0:cCHB85pEaV4bvRfywxnd2fRNBScR64UaJC8hoKzyr3M").unwrap();
         let key_internal = key.clone();
 

@@ -128,14 +128,6 @@
                                 Source='$(var.CargoTargetBinDir)\distrans.exe'
                                 KeyPath='yes'/>
                         </Component>
-                        <Component Id='binary1' Guid='*'>
-                            <File
-                                Id='exe1'
-                                Name='stress.exe'
-                                DiskId='1'
-                                Source='$(var.CargoTargetBinDir)\stress.exe'
-                                KeyPath='yes'/>
-                        </Component>
                     </Directory>
                 </Directory>
             </Directory>
@@ -158,7 +150,6 @@
             <!--<ComponentRef Id='License'/>-->
 
             <ComponentRef Id='binary0'/>
-            <ComponentRef Id='binary1'/>
 
             <Feature
                 Id='Environment'

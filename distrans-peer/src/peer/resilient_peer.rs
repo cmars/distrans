@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::{fmt::Display, path::Path, time::Duration};
 
 use backoff::{backoff::Backoff, ExponentialBackoff};
 use distrans_fileindex::Index;
@@ -7,7 +7,7 @@ use tokio::{
     sync::{broadcast::Receiver, watch},
     time::sleep,
 };
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 use veilid_core::{OperationId, Target, VeilidAPIError, VeilidUpdate};
 
 use crate::{
@@ -22,19 +22,48 @@ use super::ShareKey;
 
 pub struct ResilientPeer<P: Peer> {
     peer: P,
-    node_state_rx: tokio::sync::watch::Receiver<NodeState>,
+    node_state_rx: watch::Receiver<NodeState>,
+    peer_progress_tx: watch::Sender<Progress>,
     initial_retry_backoff: ExponentialBackoff,
     initial_reset_backoff: ExponentialBackoff,
 }
 
+#[derive(Clone)]
+pub struct Progress {
+    pub state: State,
+    pub length: u64,
+    pub position: u64,
+}
+
+#[derive(Clone)]
+pub enum State {
+    Starting,
+    Connecting,
+    Announcing,
+    Resolving,
+    Connected,
+}
+
+impl Default for Progress {
+    fn default() -> Self {
+        Progress {
+            state: State::Starting,
+            length: 0u64,
+            position: 0u64,
+        }
+    }
+}
+
 impl<P: Peer + 'static> ResilientPeer<P> {
-    pub fn new(p: P) -> ResilientPeer<P> {
-        let updates = p.subscribe_veilid_update();
+    pub fn new(peer: P) -> ResilientPeer<P> {
+        let updates = peer.subscribe_veilid_update();
         let (tx, rx) = watch::channel(NodeState::APINotStarted);
+        let (peer_progress_tx, _) = watch::channel(Progress::default());
         tokio::spawn(Self::track_node_state(updates, tx));
         ResilientPeer {
-            peer: p,
+            peer,
             node_state_rx: rx,
+            peer_progress_tx,
             initial_retry_backoff: Self::default_retry_backoff(),
             initial_reset_backoff: Self::default_reset_backoff(),
         }
@@ -48,6 +77,7 @@ impl<P: Peer + 'static> ResilientPeer<P> {
         ResilientPeer {
             peer: self.peer,
             node_state_rx: self.node_state_rx,
+            peer_progress_tx: self.peer_progress_tx,
             initial_retry_backoff: retry_backoff,
             initial_reset_backoff: reset_backoff,
         }
@@ -165,6 +195,33 @@ impl<P: Peer + 'static> ResilientPeer<P> {
         }
         Err(err)
     }
+
+    pub fn subscribe_peer_progress(&self) -> watch::Receiver<Progress> {
+        self.peer_progress_tx.subscribe()
+    }
+
+    fn update_progress(
+        peer_progress_tx: &watch::Sender<Progress>,
+        state: State,
+        back_off: &ExponentialBackoff,
+    ) {
+        warn_err(peer_progress_tx.send(if let State::Connected = state {
+            Progress {
+                state,
+                length: 0u64,
+                position: 0u64,
+            }
+        } else {
+            Progress {
+                state,
+                length: match back_off.max_elapsed_time {
+                    Some(max_time) => max_time.as_millis() as u64,
+                    None => 0u64,
+                },
+                position: back_off.get_elapsed_time().as_millis() as u64,
+            }
+        }))
+    }
 }
 
 impl<P: Peer + 'static> Peer for ResilientPeer<P> {
@@ -175,6 +232,7 @@ impl<P: Peer + 'static> Peer for ResilientPeer<P> {
     #[instrument(skip(self), level = "debug", err)]
     async fn reset(&mut self) -> Result<()> {
         let mut back_off = self.reset_backoff();
+        Self::update_progress(&self.peer_progress_tx, State::Connecting, &back_off);
         loop {
             match self.peer.reset().await {
                 Ok(_) => {
@@ -183,9 +241,11 @@ impl<P: Peer + 'static> Peer for ResilientPeer<P> {
                             if let Err(e) = wait_result {
                                 return Err(Error::other(e));
                             }
+                            Self::update_progress(&self.peer_progress_tx, State::Connected, &back_off);
                             return Ok(());
                         }
                         _ = sleep(Duration::from_secs(120)) => {
+                            Self::update_progress(&self.peer_progress_tx, State::Connecting, &back_off);
                             continue;
                         }
                     }
@@ -194,11 +254,15 @@ impl<P: Peer + 'static> Peer for ResilientPeer<P> {
                     if Self::is_retryable(&e) || Self::is_resettable(&e) {
                         if let Some(delay) = back_off.next_backoff() {
                             select! {
-                                _ = sleep(delay) => continue,
+                                _ = sleep(delay) => {
+                                    Self::update_progress(&self.peer_progress_tx, State::Connecting, &back_off);
+                                    continue;
+                                }
                                 watch_result = self.node_state_rx.wait_for(NodeState::is_connected) => {
                                     if let Err(_) = watch_result {
                                         return Err(e);
                                     }
+                                    Self::update_progress(&self.peer_progress_tx, State::Connected, &back_off);
                                     return Ok(());
                                 }
                             }
@@ -218,11 +282,16 @@ impl<P: Peer + 'static> Peer for ResilientPeer<P> {
     #[instrument(skip(self, index), level = "debug", err)]
     async fn announce(&mut self, index: &Index) -> Result<(ShareKey, Target, Header)> {
         let mut back_off = self.retry_backoff();
+        Self::update_progress(&self.peer_progress_tx, State::Announcing, &back_off);
         loop {
             match self.peer.announce(index).await {
-                Ok(resp) => return Ok(resp),
+                Ok(resp) => {
+                    Self::update_progress(&self.peer_progress_tx, State::Connected, &back_off);
+                    return Ok(resp);
+                }
                 Err(e) => {
                     self.retry_delay(&mut back_off, e).await?;
+                    Self::update_progress(&self.peer_progress_tx, State::Announcing, &back_off);
                     continue;
                 }
             }
@@ -238,15 +307,20 @@ impl<P: Peer + 'static> Peer for ResilientPeer<P> {
         header: &Header,
     ) -> Result<(Target, Header)> {
         let mut back_off = self.retry_backoff();
+        Self::update_progress(&self.peer_progress_tx, State::Announcing, &back_off);
         loop {
             match self
                 .peer
                 .reannounce_route(key, prior_route, index, header)
                 .await
             {
-                Ok(resp) => return Ok(resp),
+                Ok(resp) => {
+                    Self::update_progress(&self.peer_progress_tx, State::Connected, &back_off);
+                    return Ok(resp);
+                }
                 Err(e) => {
                     self.retry_delay(&mut back_off, e).await?;
+                    Self::update_progress(&self.peer_progress_tx, State::Announcing, &back_off);
                     continue;
                 }
             }
@@ -256,11 +330,16 @@ impl<P: Peer + 'static> Peer for ResilientPeer<P> {
     #[instrument(skip(self), level = "debug", err)]
     async fn resolve(&mut self, key: &ShareKey, root: &Path) -> Result<(Target, Header, Index)> {
         let mut back_off = self.retry_backoff();
+        Self::update_progress(&self.peer_progress_tx, State::Resolving, &back_off);
         loop {
             match self.peer.resolve(key, root).await {
-                Ok(resp) => return Ok(resp),
+                Ok(resp) => {
+                    Self::update_progress(&self.peer_progress_tx, State::Connected, &back_off);
+                    return Ok(resp);
+                }
                 Err(e) => {
                     self.retry_delay(&mut back_off, e).await?;
+                    Self::update_progress(&self.peer_progress_tx, State::Resolving, &back_off);
                     continue;
                 }
             }
@@ -274,18 +353,23 @@ impl<P: Peer + 'static> Peer for ResilientPeer<P> {
         prior_route: Option<Target>,
     ) -> Result<(Target, Header)> {
         let mut back_off = self.retry_backoff();
+        Self::update_progress(&self.peer_progress_tx, State::Resolving, &back_off);
         loop {
             match self.peer.reresolve_route(key, prior_route).await {
-                Ok(resp) => return Ok(resp),
+                Ok(resp) => {
+                    Self::update_progress(&self.peer_progress_tx, State::Connected, &back_off);
+                    return Ok(resp);
+                }
                 Err(e) => {
                     self.retry_delay(&mut back_off, e).await?;
+                    Self::update_progress(&self.peer_progress_tx, State::Resolving, &back_off);
                     continue;
                 }
             }
         }
     }
 
-    #[instrument(skip(self), level = "debug", err)]
+    #[instrument(skip(self), level = "trace", err)]
     async fn request_block(
         &mut self,
         target: Target,
@@ -304,9 +388,9 @@ impl<P: Peer + 'static> Peer for ResilientPeer<P> {
         }
     }
 
-    #[instrument(skip(self, contents), level = "debug", err)]
+    #[instrument(skip(self, contents), level = "trace", err)]
     async fn reply_block_contents(&mut self, call_id: OperationId, contents: &[u8]) -> Result<()> {
-        let mut back_off = ExponentialBackoff::default();
+        let mut back_off = self.retry_backoff();
         loop {
             match self.peer.reply_block_contents(call_id, contents).await {
                 Ok(resp) => return Ok(resp),
@@ -319,11 +403,18 @@ impl<P: Peer + 'static> Peer for ResilientPeer<P> {
     }
 }
 
+fn warn_err<T, E: Display>(result: std::result::Result<T, E>) {
+    if let Err(e) = result {
+        warn!(err = format!("{}", e));
+    }
+}
+
 impl<P: Peer> Clone for ResilientPeer<P> {
     fn clone(&self) -> Self {
         ResilientPeer {
             peer: self.peer.clone(),
             node_state_rx: self.node_state_rx.clone(),
+            peer_progress_tx: self.peer_progress_tx.clone(),
             initial_retry_backoff: self.initial_retry_backoff.clone(),
             initial_reset_backoff: self.initial_reset_backoff.clone(),
         }

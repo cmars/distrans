@@ -49,6 +49,7 @@ impl VeilidPeer {
                 .await?);
         }
         let o_cnt = header.subkeys() + 1;
+        debug!(o_cnt, "header subkeys");
         let dht_rec = self
             .routing_context
             .create_dht_record(DHTSchema::dflt(o_cnt)?, None)
@@ -183,6 +184,7 @@ impl Peer for VeilidPeer {
         let index_bytes = encode_index(index).map_err(Error::internal_protocol)?;
         let (announce_route, route_data) = self.routing_context.api().new_private_route().await?;
         let header = Header::from_index(index, index_bytes.as_slice(), route_data.as_slice());
+        trace!(header = format!("{:?}", header));
         let dht_rec = self.open_or_create_dht_record(&header).await?;
         let dht_key = dht_rec.key().to_owned();
         self.write_index_bytes(&dht_key, index_bytes.as_slice())
