@@ -139,6 +139,9 @@ impl Error {
     pub fn internal_protocol(err: proto::Error) -> Error {
         Error::InternalProtocol(err)
     }
+    pub fn cancelled<E>(_err: E) -> Error {
+        Error::Fault(Unexpected::Cancelled)
+    }
 
     pub fn is_route_invalid(err: &Error) -> bool {
         if let Error::Node { state, err: _ } = err {
@@ -186,6 +189,7 @@ pub enum Unexpected {
     Utf8(std::str::Utf8Error),
     IntOverflow(TryFromIntError),
     SliceSize(TryFromSliceError),
+    Cancelled,
     Other(String),
 }
 
@@ -196,6 +200,7 @@ impl fmt::Display for Unexpected {
             Unexpected::Utf8(e) => write!(f, "utf8 encoding failed: {}", e),
             Unexpected::IntOverflow(e) => write!(f, "integer overflow: {}", e),
             Unexpected::SliceSize(e) => write!(f, "unexpected slice size: {}", e),
+            Unexpected::Cancelled => write!(f, "cancelled"),
             Unexpected::Other(e) => write!(f, "{}", e),
         }
     }
