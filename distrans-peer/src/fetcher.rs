@@ -1,17 +1,21 @@
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use backoff::backoff::Backoff;
+use backoff::ExponentialBackoff;
 use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS, PIECE_SIZE_BYTES};
 use flume::{unbounded, Receiver, Sender};
 use sha2::{Digest, Sha256};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
-use tokio::sync::watch;
+use tokio::select;
+use tokio::sync::{watch, RwLock};
 use tokio::task::JoinSet;
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::{info, instrument, trace, warn};
 use veilid_core::{FromStr, Target, TypedKey};
 
 use crate::error::Unexpected;
@@ -24,7 +28,7 @@ const N_FETCHERS: u8 = 20;
 pub struct Fetcher<P: Peer> {
     peer: P,
     share_key: ShareKey,
-    route: Arc<Mutex<(Target, Header)>>,
+    route: Arc<RwLock<(Target, Header)>>,
     index: Index,
     fetch_progress_tx: watch::Sender<Progress>,
     verify_progress_tx: watch::Sender<Progress>,
@@ -58,7 +62,7 @@ impl<P: Peer> Clone for Fetcher<P> {
     }
 }
 
-impl<P: Peer + 'static> Fetcher<P> {
+impl<P: Peer + Clone + 'static> Fetcher<P> {
     pub async fn from_dht(mut peer: P, share_key_str: &str, root: &str) -> Result<Fetcher<P>> {
         let share_key = TypedKey::from_str(share_key_str)?;
         let root_path_buf = PathBuf::from_str(root).unwrap();
@@ -75,7 +79,7 @@ impl<P: Peer + 'static> Fetcher<P> {
         Ok(Fetcher {
             peer,
             share_key,
-            route: Arc::new(Mutex::new((target, header))),
+            route: Arc::new(RwLock::new((target, header))),
             index,
             fetch_progress_tx,
             verify_progress_tx,
@@ -103,58 +107,154 @@ impl<P: Peer + 'static> Fetcher<P> {
         hex::encode(self.index.payload().digest())
     }
 
-    pub async fn fetch(self, cancel: CancellationToken) -> Result<()> {
-        let (fetch_block_sender, fetch_block_receiver) = unbounded();
-        let (verify_sender, verify_receiver) = unbounded();
+    pub async fn fetch(mut self, cancel: CancellationToken) -> Result<()> {
+        let (fetch_tx, fetch_rx) = unbounded();
+        let (verify_tx, verify_rx) = unbounded();
 
         let index = self.index.clone();
-        let mut tasks = JoinSet::new();
         let done = CancellationToken::new();
-        tasks.spawn(Self::enqueue_blocks(
-            cancel.clone(),
-            fetch_block_sender.clone(),
-            index,
-        ));
-        tasks.spawn(Self::verify_blocks(
+        Self::enqueue_blocks(cancel.clone(), fetch_tx.clone(), index).await?;
+        let mut verify_tasks = JoinSet::new();
+        verify_tasks.spawn(Self::verify_blocks(
             self.index.clone(),
             cancel.clone(),
             done.clone(),
-            fetch_block_sender.clone(),
-            verify_receiver,
+            fetch_tx.clone(),
+            verify_rx.clone(),
             self.verify_progress_tx.clone(),
         ));
+        let mut fetch_tasks = JoinSet::new();
         for i in 0..N_FETCHERS {
-            tasks.spawn(self.clone().fetch_blocks(
+            fetch_tasks.spawn(self.clone().fetch_blocks(
                 cancel.clone(),
                 done.clone(),
-                fetch_block_sender.clone(),
-                fetch_block_receiver.clone(),
-                verify_sender.clone(),
+                fetch_tx.clone(),
+                fetch_rx.clone(),
+                verify_tx.clone(),
                 i,
             ));
         }
         let mut result = Ok(());
-        while let Some(join_res) = tasks.join_next().await {
-            match join_res {
-                Ok(res) => {
-                    if let Err(e) = res {
-                        if let Error::Fault(Unexpected::Cancelled) = e {
-                        } else {
+        let mut verify_progress_rx = self.verify_progress_tx.subscribe();
+        loop {
+            select! {
+                verify_status = verify_tasks.join_next() => {
+                    if verify_rx.is_empty() {
+                        // If we verified all the blocks, forget any prior
+                        // errors, they were temporary.
+                        result = Ok(());
+                    }
+                    match verify_status {
+                        None => {
+                            done.cancel();
+                            break
+                        }
+                        Some(Err(e)) => {
                             warn!(err = format!("{}", e));
+                            if let Ok(_) = result {
+                                result = Err(Error::other(e));
+                            }
+                            done.cancel();
+                            break;
                         }
-                        if let Ok(_) = result {
-                            result = Err(e);
+                        Some(Ok(Err(e))) => {
+                            if let Ok(_) = result {
+                                result = Err(e);
+                            }
+                            done.cancel();
+                            break;
                         }
-                        cancel.cancel();
+                        _ => {}
+                    };
+                }
+                verify_progress_result = verify_progress_rx.changed() => {
+                    if let Err(_) = verify_progress_result {
+                        continue;
+                    }
+                    // A block was verified, meaning we're still making progress.
+                    // Re-spawn fetchers that might have exited on temporary errors.
+                    if !fetch_rx.is_empty() && fetch_tasks.len() < N_FETCHERS as usize {
+                        for i in fetch_tasks.len() as u8..N_FETCHERS {
+                            fetch_tasks.spawn(self.clone().fetch_blocks(
+                                cancel.clone(),
+                                done.clone(),
+                                fetch_tx.clone(),
+                                fetch_rx.clone(),
+                                verify_tx.clone(),
+                                i,
+                            ));
+                        }
                     }
                 }
-                Err(e) => {
-                    if let Ok(_) = result {
-                        result = Err(Error::other(e));
+                fetch_status = fetch_tasks.join_next() => {
+                    match fetch_status {
+                        None => {
+                            // Are we done fetching? Or do we need to reset / retry / restart fetchers?
+                            if fetch_rx.is_empty() {
+                                continue;
+                            }
+
+                            // Reset the peer
+                            let mut backoff = ExponentialBackoff::default();
+                            loop {
+                                let result = self.peer.reset().await;
+                                if let Err(e) = result {
+                                    if !e.is_resetable() {
+                                        done.cancel();
+                                        return Err(e);
+                                    }
+                                    match backoff.next_backoff() {
+                                        Some(delay) => sleep(delay).await,
+                                        None => return Err(Error::other("peer reset retries exceeded")),
+                                    }
+                                }
+                                break;
+                            }
+
+                            // Attempt to re-resolve the route
+                            let mut route = self.route.write().await;
+                            match self.peer.reresolve_route(&self.share_key, None).await {
+                                Ok((target, header)) => *route = (target, header),
+                                Err(e) => warn!(err = format!("{}", e), "failed to re-resolve route"),
+                            };
+                            drop(route);
+
+                            // Relaunch fetchers
+                            for i in 0..N_FETCHERS {
+                                fetch_tasks.spawn(self.clone().fetch_blocks(
+                                    cancel.clone(),
+                                    done.clone(),
+                                    fetch_tx.clone(),
+                                    fetch_rx.clone(),
+                                    verify_tx.clone(),
+                                    i,
+                                ));
+                            }
+                        }
+                        Some(Err(e)) => {
+                            // Problem with the job itself, shut down
+                            warn!(err = format!("{}", e));
+                            if let Ok(_) = result {
+                                result = Err(Error::other(e));
+                            }
+                            done.cancel();
+                            break;
+                        }
+                        Some(Ok(Err(e))) => {
+                            if let Ok(_) = result {
+                                result = Err(e);
+                            }
+                        }
+                        _ => {}
                     }
-                    cancel.cancel();
                 }
             }
+        }
+        if !verify_tasks.is_empty() {
+            verify_tasks.abort_all();
+        }
+        if !fetch_tasks.is_empty() {
+            fetch_tasks.abort_all();
         }
 
         result
@@ -183,6 +283,24 @@ impl<P: Peer + 'static> Fetcher<P> {
                     };
                     trace!(task_id, fetch = format!("{:?}", fetch));
                     let fetch_result: Result<()> = async {
+                        // Request block from peer
+                        let target = self.route.read().await.0.clone();
+                        let result = self.peer.request_block(
+                            target.clone(),
+                            fetch.piece_index,
+                            fetch.block_index,
+                        ).await;
+                        if let Err(e) = result {
+                            let mut route = self.route.write().await;
+                            if e.is_route_invalid() {
+                                let (target, header) = self.peer.reresolve_route(&self.share_key, Some(target)).await?;
+                                *route = (target, header);
+                            }
+                            return Err(e);
+                        }
+                        let mut block = result?;
+
+                        // Write the block to the file
                         let fh = match fh_map.get_mut(&fetch.file_index) {
                             Some(fh) => fh,
                             None => {
@@ -192,23 +310,7 @@ impl<P: Peer + 'static> Fetcher<P> {
                                 fh_map.get_mut(&fetch.file_index).unwrap()
                             }
                         };
-
                         fh.seek(SeekFrom::Start(fetch.block_offset() as u64)).await?;
-                        let target = self.target();
-                        let result = self.peer.request_block(
-                            target.clone(),
-                            fetch.piece_index,
-                            fetch.block_index,
-                        ).await;
-                        if let Err(e) = result {
-                            if Error::is_route_invalid(&e) {
-                                let (target, header) = self.peer.reresolve_route(&self.share_key, Some(target)).await?;
-                                self.set_route(target, header);
-                            }
-                            return Err(e);
-                        }
-                        let mut block = result?;
-
                         let block_end = min(block.len(), BLOCK_SIZE_BYTES);
                         fh.write_all(block[fetch.piece_offset..block_end].as_mut()).await?;
                         self.fetch_progress_tx.send_modify(|p| {
@@ -224,10 +326,12 @@ impl<P: Peer + 'static> Fetcher<P> {
                     }.await;
                     match fetch_result {
                         Ok(()) => {}
-                        Err(Error::Fault(Unexpected::Cancelled)) => return fetch_result,
-                        Err(e) => {
+                        Err(ref e) => {
                             warn!(err = format!("{}", e), "fetch block failed, queued for retry");
                             fetch_block_sender.send_async(fetch).await.map_err(Error::cancelled)?;
+                            if !e.is_route_invalid() {
+                                return fetch_result;
+                            }
                         }
                     };
                 }
@@ -239,16 +343,6 @@ impl<P: Peer + 'static> Fetcher<P> {
                 }
             }
         }
-    }
-
-    fn target(&self) -> Target {
-        self.route.lock().unwrap().0.to_owned()
-    }
-
-    fn set_route(&mut self, target: Target, header: Header) {
-        debug!(route_data = hex::encode(header.route_data()), "set_route");
-        let mut route_guard = self.route.lock().unwrap();
-        *route_guard = (target, header);
     }
 
     async fn enqueue_blocks(
@@ -466,7 +560,6 @@ mod tests {
     use crate::{
         proto::encode_index,
         tests::{temp_file, StubPeer},
-        ResilientPeer,
     };
 
     use super::*;
@@ -498,7 +591,8 @@ mod tests {
             ))
         }));
         stub_peer.request_block_result = Arc::new(Mutex::new(|| Ok(vec![0xa5u8; 32768])));
-        let rp = ResilientPeer::new(stub_peer);
+        let rp = stub_peer;
+
         // Simulate getting connected to network, normally track_node_state
         // would set this when the node comes online.
         update_tx

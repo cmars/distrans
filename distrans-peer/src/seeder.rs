@@ -89,18 +89,16 @@ impl<P: Peer> Seeder<P> {
                         match self.handle_update(&mut fh, &mut buf, &update).await {
                             Ok(()) => break,
                             Err(e) => {
-                                if Error::is_route_invalid(&e) {
-                                    if let Some(delay) = back_off.next_backoff() {
-                                        tokio::time::sleep(delay).await;
-                                    }
-                                    else {
-                                        return Err(e)
-                                    }
+                                if e.is_route_invalid() {
                                     let (target, header) = self.peer.reannounce_route(&self.share_key, Some(self.target), &self.index, &self.header).await?;
                                     self.target = target;
                                     self.header = header;
                                 } else {
-                                    return Err(e)
+                                    self.peer.reset().await?;
+                                }
+
+                                if let Some(delay) = back_off.next_backoff() {
+                                    tokio::time::sleep(delay).await;
                                 }
                             }
                         };
@@ -192,7 +190,6 @@ mod tests {
         error::Unexpected,
         proto::{encode_block_request, encode_index, BlockRequest},
         tests::{temp_file, StubPeer},
-        ResilientPeer,
     };
 
     use super::*;
@@ -241,7 +238,7 @@ mod tests {
             (*(reply_calls_internal.lock().unwrap())) += 1;
             Ok(())
         }));
-        let rp = ResilientPeer::new(stub_peer);
+        let rp = stub_peer;
 
         // Simulate getting connected to network, normally track_node_state
         // would set this when the node comes online.
