@@ -1,9 +1,10 @@
 use std::time::Duration;
 
+use backoff::{backoff::Backoff, ExponentialBackoff};
 use color_eyre::{eyre::Error, Result};
 use distrans_fileindex::Indexer;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use tokio::{select, spawn};
+use tokio::{select, spawn, time::sleep};
 use tokio_util::sync::CancellationToken;
 
 use distrans_peer::{new_routing_context, Fetcher, Observable, Peer, PeerState, Seeder, Veilid};
@@ -95,7 +96,27 @@ impl App {
                 }
             }
         });
-        peer.reset().await?;
+
+        let mut backoff = ExponentialBackoff::default();
+        loop {
+            let result = peer.reset().await;
+            if let Err(e) = result {
+                if !e.is_resetable() {
+                    cancel.cancel();
+                    return Err(e.into());
+                }
+                match backoff.next_backoff() {
+                    Some(delay) => sleep(delay).await,
+                    None => {
+                        cancel.cancel();
+                        return Err(
+                            distrans_peer::Error::other("peer reset retries exceeded").into()
+                        );
+                    }
+                }
+            }
+            break;
+        }
 
         let ctrl_c_cancel = cancel.clone();
         let canceller = tokio::spawn(async move {

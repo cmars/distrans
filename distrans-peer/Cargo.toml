@@ -15,7 +15,7 @@ name = "distrans_peer"
 path = "src/lib.rs"
 
 [dependencies]
-backoff = { version = "0.4.0", features = ["tokio"] }
+backoff = { workspace = true }
 capnp = "0.18"
 distrans_fileindex = { version = "0", path = "../distrans-fileindex" }
 flume = "0.11"

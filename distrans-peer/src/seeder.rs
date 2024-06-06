@@ -6,9 +6,11 @@ use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncSeekExt},
     select,
+    sync::watch,
+    time::sleep,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 use veilid_core::{Target, VeilidAPIError, VeilidUpdate};
 
 use distrans_fileindex::{Index, Indexer, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
@@ -80,28 +82,42 @@ impl<P: Peer> Seeder<P> {
 
         let mut updates = self.peer.subscribe_veilid_update();
 
+        let (update_err_tx, mut update_err_rx) = watch::channel(Ok(()));
+
         loop {
             select! {
                 recv_update = updates.recv() => {
                     let update = recv_update.map_err(Error::other)?;
-                    let mut back_off = Self::reroute_backoff();
+                    if let Err(e) = self.handle_update(&mut fh, &mut buf, &update).await {
+                        if let Error::RemoteProtocol(_) = e {
+                            // ignore bad requests
+                        }
+                        else if e.is_resetable() {
+                            update_err_tx.send(Err(e)).map_err(Error::other)?;
+                        }
+                    }
+                }
+                _ = update_err_rx.changed() => {
+                    // Reset the peer
+                    let mut backoff = ExponentialBackoff::default();
                     loop {
-                        match self.handle_update(&mut fh, &mut buf, &update).await {
-                            Ok(()) => break,
-                            Err(e) => {
-                                if e.is_route_invalid() {
-                                    let (target, header) = self.peer.reannounce_route(&self.share_key, Some(self.target), &self.index, &self.header).await?;
-                                    self.target = target;
-                                    self.header = header;
-                                } else {
-                                    self.peer.reset().await?;
-                                }
-
-                                if let Some(delay) = back_off.next_backoff() {
-                                    tokio::time::sleep(delay).await;
-                                }
+                        let result = self.peer.reset().await;
+                        if let Err(e) = result {
+                            if !e.is_resetable() {
+                                return Err(e);
                             }
-                        };
+                            match backoff.next_backoff() {
+                                Some(delay) => sleep(delay).await,
+                                None => return Err(Error::other("peer reset retries exceeded")),
+                            }
+                        }
+                        break;
+                    }
+
+                    // Attempt to reannounce the route
+                    if let Err(e) = self.reannounce_route().await {
+                        warn!(err = format!("{}", e), "failed to reannounce route");
+                        update_err_tx.send(Err(e)).map_err(Error::other)?;
                     }
                 }
                 _ = cancel.cancelled() => {
@@ -111,10 +127,6 @@ impl<P: Peer> Seeder<P> {
             }
         }
         Ok(())
-    }
-
-    fn reroute_backoff() -> ExponentialBackoff {
-        ExponentialBackoff::default()
     }
 
     async fn handle_update(
@@ -152,17 +164,8 @@ impl<P: Peer> Seeder<P> {
                 }
                 debug!(target = target_route_id.to_string(), "route changed");
 
-                let (target, header) = self
-                    .peer
-                    .reannounce_route(
-                        &self.share_key,
-                        Some(self.target.to_owned()),
-                        &self.index,
-                        &self.header,
-                    )
-                    .await?;
-                self.target = target;
-                self.header = header;
+                self.reannounce_route().await?;
+
                 Ok(())
             }
             &VeilidUpdate::Shutdown => Err(Error::Fault(crate::error::Unexpected::Veilid(
@@ -170,6 +173,21 @@ impl<P: Peer> Seeder<P> {
             ))),
             _ => Ok(()),
         }
+    }
+
+    async fn reannounce_route(&mut self) -> Result<()> {
+        let (target, header) = self
+            .peer
+            .reannounce_route(
+                &self.share_key,
+                Some(self.target.to_owned()),
+                &self.index,
+                &self.header,
+            )
+            .await?;
+        self.target = target;
+        self.header = header;
+        Ok(())
     }
 }
 
@@ -187,9 +205,9 @@ mod tests {
     };
 
     use crate::{
-        error::Unexpected,
         proto::{encode_block_request, encode_index, BlockRequest},
         tests::{temp_file, StubPeer},
+        Observable,
     };
 
     use super::*;
@@ -238,7 +256,7 @@ mod tests {
             (*(reply_calls_internal.lock().unwrap())) += 1;
             Ok(())
         }));
-        let rp = stub_peer;
+        let rp = Observable::new(stub_peer);
 
         // Simulate getting connected to network, normally track_node_state
         // would set this when the node comes online.
@@ -250,9 +268,9 @@ mod tests {
             })))
             .expect("send veilid update");
 
-        let seeder = Seeder::from_file(rp, tf_path.to_str().unwrap())
-            .await
-            .expect("from_file");
+        let indexer = Indexer::from_file(tf_path.into()).await.expect("indexer");
+        let index = indexer.index().await.expect("index");
+        let seeder = Seeder::new(rp, index).await.expect("new seeder");
         let cancel = CancellationToken::new();
         let update_tx_internal = update_tx.clone();
         tokio::spawn(async move {
@@ -286,10 +304,7 @@ mod tests {
             Ok::<(), Error>(())
         });
         let result = seeder.seed(cancel).await;
-        assert!(matches!(
-            result,
-            Err(Error::Fault(Unexpected::Veilid(VeilidAPIError::Shutdown)))
-        ));
+        assert!(matches!(result, Err(_)));
 
         assert_eq!(*(reannounce_calls.lock().unwrap()), 1);
         assert_eq!(*(reply_calls.lock().unwrap()), 1);

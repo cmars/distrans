@@ -26,7 +26,7 @@ pub enum Error {
     /// Protocol error when trying to encode a message.
     /// Similar to an HTTP 500, "it's not you it's me."
     InternalProtocol(proto::Error),
-    BreakerOpen(Option<Box<Error>>),
+    ResetTimeout,
 }
 
 impl std::error::Error for Error {}
@@ -50,8 +50,7 @@ impl fmt::Display for Error {
             Error::Node { state, err } => write!(f, "{}: {}", state, err),
             Error::RemoteProtocol(e) => write!(f, "invalid response from remote peer: {}", e),
             Error::InternalProtocol(e) => write!(f, "failed to encode protocol message: {}", e),
-            Error::BreakerOpen(None) => write!(f, "breaker open"),
-            Error::BreakerOpen(Some(inner)) => write!(f, "breaker open: {}", inner),
+            Error::ResetTimeout => write!(f, "reset timeout"),
         }
     }
 }
@@ -154,20 +153,12 @@ impl Error {
         }
     }
 
-    pub fn is_breaker_open(&self) -> bool {
-        if let Error::BreakerOpen(_) = self {
-            true
-        } else {
-            false
-        }
-    }
-
     pub fn is_retriable(&self) -> bool {
         match self {
             Error::Fault(_) => true,
             Error::Node { state, err: _ } => *state == NodeState::RemotePeerNotAvailable,
             Error::RemoteProtocol(_) => true,
-            Error::BreakerOpen(_) => true,
+            Error::ResetTimeout => true,
             _ => false,
         }
     }

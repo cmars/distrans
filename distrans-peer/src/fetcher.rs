@@ -560,6 +560,7 @@ mod tests {
     use crate::{
         proto::encode_index,
         tests::{temp_file, StubPeer},
+        Observable,
     };
 
     use super::*;
@@ -591,7 +592,7 @@ mod tests {
             ))
         }));
         stub_peer.request_block_result = Arc::new(Mutex::new(|| Ok(vec![0xa5u8; 32768])));
-        let rp = stub_peer;
+        let rp = Observable::new(stub_peer);
 
         // Simulate getting connected to network, normally track_node_state
         // would set this when the node comes online.

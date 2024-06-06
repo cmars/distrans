@@ -47,7 +47,7 @@ impl Default for Progress {
 }
 
 impl<P: Peer + 'static> Observable<P> {
-    const DEFAULT_RESET_TIMEOUT: Duration = Duration::from_secs(120);
+    const DEFAULT_RESET_TIMEOUT: Duration = Duration::from_secs(180);
 
     pub fn new(peer: P) -> Observable<P> {
         let updates = peer.subscribe_veilid_update();
@@ -135,7 +135,7 @@ impl<P: Peer + 'static> Peer for Observable<P> {
             }
             _ = sleep(Self::DEFAULT_RESET_TIMEOUT) => {
                 Self::update_progress(&self.peer_progress_tx, State::Down);
-                return Err(Error::BreakerOpen(None));
+                return Err(Error::ResetTimeout);
             }
         }
     }
