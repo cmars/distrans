@@ -51,9 +51,9 @@ pub trait Peer: Clone + Send {
     ) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
-mod veilid_peer;
-pub use veilid_peer::VeilidPeer;
+mod veilid;
+pub use veilid::Veilid;
 
-mod resilient_peer;
-pub use resilient_peer::ResilientPeer;
-pub use resilient_peer::State as PeerState;
+mod observable;
+pub use observable::Observable;
+pub use observable::State as PeerState;

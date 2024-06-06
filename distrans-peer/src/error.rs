@@ -26,6 +26,7 @@ pub enum Error {
     /// Protocol error when trying to encode a message.
     /// Similar to an HTTP 500, "it's not you it's me."
     InternalProtocol(proto::Error),
+    ResetTimeout,
 }
 
 impl std::error::Error for Error {}
@@ -49,6 +50,7 @@ impl fmt::Display for Error {
             Error::Node { state, err } => write!(f, "{}: {}", state, err),
             Error::RemoteProtocol(e) => write!(f, "invalid response from remote peer: {}", e),
             Error::InternalProtocol(e) => write!(f, "failed to encode protocol message: {}", e),
+            Error::ResetTimeout => write!(f, "reset timeout"),
         }
     }
 }
@@ -143,11 +145,40 @@ impl Error {
         Error::Fault(Unexpected::Cancelled)
     }
 
-    pub fn is_route_invalid(err: &Error) -> bool {
-        if let Error::Node { state, err: _ } = err {
+    pub fn is_route_invalid(&self) -> bool {
+        if let Error::Node { state, err: _ } = self {
             *state == NodeState::PrivateRouteInvalid
         } else {
             false
+        }
+    }
+
+    pub fn is_retriable(&self) -> bool {
+        match self {
+            Error::Fault(_) => true,
+            Error::Node { state, err: _ } => *state == NodeState::RemotePeerNotAvailable,
+            Error::RemoteProtocol(_) => true,
+            Error::ResetTimeout => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_resetable(&self) -> bool {
+        match self {
+            Error::Index { path: _, err: _ } => false,
+            Error::LocalFile(_) => false,
+            Error::InternalProtocol(_) => false,
+            Error::Node { state, err: _ } => match state {
+                NodeState::APIShuttingDown => false,
+                NodeState::PrivateRouteInvalid => false,
+                _ => true,
+            },
+            Error::Fault(err) => match err {
+                Unexpected::Veilid(VeilidAPIError::Unimplemented { message: _ }) => false,
+                Unexpected::Veilid(_) => true,
+                _ => false,
+            },
+            _ => true,
         }
     }
 }

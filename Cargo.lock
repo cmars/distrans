@@ -932,6 +932,7 @@ dependencies = [
 name = "distrans"
 version = "0.3.0"
 dependencies = [
+ "backoff",
  "clap",
  "color-eyre",
  "dirs",

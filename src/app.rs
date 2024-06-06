@@ -1,14 +1,13 @@
 use std::time::Duration;
 
+use backoff::{backoff::Backoff, ExponentialBackoff};
 use color_eyre::{eyre::Error, Result};
 use distrans_fileindex::Indexer;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use tokio::{select, spawn};
+use tokio::{select, spawn, time::sleep};
 use tokio_util::sync::CancellationToken;
 
-use distrans_peer::{
-    new_routing_context, Fetcher, Peer, PeerState, ResilientPeer, Seeder, VeilidPeer,
-};
+use distrans_peer::{new_routing_context, Fetcher, Observable, Peer, PeerState, Seeder, Veilid};
 
 use crate::{cli::Commands, initialize_ui_logging, Cli};
 
@@ -19,6 +18,8 @@ pub struct App {
     bytes_style: ProgressStyle,
     msg_style: ProgressStyle,
 }
+
+type AppPeer = Observable<Veilid>;
 
 impl App {
     pub fn new(cli: Cli) -> Result<App> {
@@ -65,7 +66,7 @@ impl App {
                     }
                     peer_result = peer_progress_rx.changed() => {
                         peer_result?;
-                        let peer_progress = peer_progress_rx.borrow();
+                        let peer_progress = peer_progress_rx.borrow_and_update();
                         if let PeerState::Connected = peer_progress.state {
                             peer_progress_bar.set_style(peer_msg_style.clone());
                             peer_progress_bar.set_prefix("🟢");
@@ -95,15 +96,39 @@ impl App {
                 }
             }
         });
-        peer.reset().await?;
+
+        let mut backoff = ExponentialBackoff::default();
+        loop {
+            let result = peer.reset().await;
+            if let Err(e) = result {
+                if !e.is_resetable() {
+                    cancel.cancel();
+                    return Err(e.into());
+                }
+                match backoff.next_backoff() {
+                    Some(delay) => sleep(delay).await,
+                    None => {
+                        cancel.cancel();
+                        return Err(
+                            distrans_peer::Error::other("peer reset retries exceeded").into()
+                        );
+                    }
+                }
+            }
+            break;
+        }
 
         let ctrl_c_cancel = cancel.clone();
         let canceller = tokio::spawn(async move {
-            tokio::select! {
-                _ = ctrl_c_cancel.cancelled() => {
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    ctrl_c_cancel.cancel();
+            loop {
+                tokio::select! {
+                    _ = ctrl_c_cancel.cancelled() => {
+                        return Ok::<(), Error>(())
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        ctrl_c_cancel.cancel();
+                        return Ok(())
+                    }
                 }
             }
         });
@@ -119,20 +144,20 @@ impl App {
                 Err(distrans_peer::Error::other("invalid command").into())
             }
         };
-        canceller.await?;
+        let _ = canceller.await?;
         Ok(result?)
     }
 
-    async fn new_peer(&self) -> Result<ResilientPeer<VeilidPeer>> {
+    async fn new_peer(&self) -> Result<AppPeer> {
         let (routing_context, update_tx, _) = new_routing_context(&self.cli.state_dir()?).await?;
-        let peer = ResilientPeer::new(VeilidPeer::new(routing_context, update_tx).await?);
+        let peer = Observable::new(Veilid::new(routing_context, update_tx).await?);
         Ok(peer)
     }
 
     async fn do_fetch(
         &self,
         m: MultiProgress,
-        peer: ResilientPeer<VeilidPeer>,
+        peer: AppPeer,
         cancel: CancellationToken,
         share_key: &str,
         root: &str,
@@ -155,7 +180,7 @@ impl App {
                     }
                     fetch_result = fetch_progress_rx.changed() => {
                         fetch_result?;
-                        let fetch_progress = fetch_progress_rx.borrow();
+                        let fetch_progress = fetch_progress_rx.borrow_and_update();
                         fetch_progress_bar.update(|pb| {
                             pb.set_len(fetch_progress.length);
                             pb.set_pos(fetch_progress.position);
@@ -166,7 +191,7 @@ impl App {
                     }
                     verify_result = verify_progress_rx.changed() => {
                         verify_result?;
-                        let verify_progress = verify_progress_rx.borrow();
+                        let verify_progress = verify_progress_rx.borrow_and_update();
                         verify_progress_bar.update(|pb| {
                             pb.set_len(verify_progress.length);
                             pb.set_pos(verify_progress.position);
@@ -206,7 +231,7 @@ impl App {
     async fn do_seed(
         &self,
         m: MultiProgress,
-        peer: ResilientPeer<VeilidPeer>,
+        peer: AppPeer,
         cancel: CancellationToken,
         file: &str,
     ) -> Result<()> {
@@ -230,7 +255,7 @@ impl App {
                     }
                     index_result = index_progress_rx.changed() => {
                         index_result?;
-                        let index_progress = index_progress_rx.borrow();
+                        let index_progress = index_progress_rx.borrow_and_update();
                         index_progress_bar.update(|pb| {
                             pb.set_len(index_progress.length);
                             pb.set_pos(index_progress.position);
@@ -242,7 +267,7 @@ impl App {
                     }
                     digest_result = digest_progress_rx.changed() => {
                         digest_result?;
-                        let digest_progress = digest_progress_rx.borrow();
+                        let digest_progress = digest_progress_rx.borrow_and_update();
                         digest_progress_bar.update(|pb| {
                             pb.set_len(digest_progress.length);
                             pb.set_pos(digest_progress.position);

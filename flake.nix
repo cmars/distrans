@@ -4,7 +4,7 @@
   inputs = {
     # NixOS 23.11 has recent enough versions of capnproto and protobuf to
     # develop on Veilid.
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-23.11";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
 
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
