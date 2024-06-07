@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use backoff::{backoff::Backoff, ExponentialBackoff};
-use color_eyre::{eyre::Error, Result};
+use color_eyre::{eyre::Error, owo_colors::OwoColorize, Result};
 use distrans_fileindex::Indexer;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use tokio::{select, spawn, time::sleep};
@@ -163,15 +163,28 @@ impl App {
         root: &str,
     ) -> Result<()> {
         let fetcher = Fetcher::from_dht(peer.clone(), share_key, root).await?;
+
+        let fetch_progress = m.add(
+            ProgressBar::new(0u64)
+                .with_style(self.spinner_style.clone())
+                .with_prefix("📥"),
+        );
+        fetch_progress.set_message(format!(
+            "Fetching {} into {}",
+            fetcher.file().bold().bright_cyan(),
+            root
+        ));
+        let fetch_progress_spinner = fetch_progress.clone();
+
         let progress_cancel = cancel.clone();
         let mut fetch_progress_rx = fetcher.subscribe_fetch_progress();
         let mut verify_progress_rx = fetcher.subscribe_verify_progress();
         let fetch_progress_bar = m.add(ProgressBar::new(0u64));
         fetch_progress_bar.set_style(self.bytes_style.clone());
-        fetch_progress_bar.set_message("Fetching share");
+        fetch_progress_bar.set_message("Fetching blocks");
         let verify_progress_bar = m.add(ProgressBar::new(0u64));
         verify_progress_bar.set_style(self.bar_style.clone());
-        verify_progress_bar.set_message("Verifying share");
+        verify_progress_bar.set_message("Verifying blocks");
         spawn(async move {
             loop {
                 select! {
@@ -181,6 +194,10 @@ impl App {
                     fetch_result = fetch_progress_rx.changed() => {
                         fetch_result?;
                         let fetch_progress = fetch_progress_rx.borrow_and_update();
+                        fetch_progress_spinner.update(|pb| {
+                            pb.set_len(fetch_progress.length);
+                            pb.set_pos(fetch_progress.position);
+                        });
                         fetch_progress_bar.update(|pb| {
                             pb.set_len(fetch_progress.length);
                             pb.set_pos(fetch_progress.position);
@@ -203,13 +220,6 @@ impl App {
                 }
             }
         });
-        let fetch_progress = m.add(
-            ProgressBar::new(0u64)
-                .with_style(self.spinner_style.clone())
-                .with_prefix("📥"),
-        );
-        fetch_progress.enable_steady_tick(Duration::from_millis(250));
-        fetch_progress.set_message("Fetching share");
 
         let fetch_result = fetcher.fetch(cancel.clone()).await;
         let msg = match fetch_result {
@@ -288,7 +298,22 @@ impl App {
                 .with_style(self.msg_style.clone())
                 .with_prefix("🌱"),
         );
-        seed_progress.set_message(format!("Seeding {}", share_key));
+        seed_progress.set_message(format!(
+            "Seeding {} to {}",
+            file.bold().bright_cyan(),
+            share_key.clone().bold().bright_cyan()
+        ));
+        let info_progress = m.add(
+            ProgressBar::new(0u64)
+                .with_style(self.msg_style.clone())
+                .with_prefix("🎁"),
+        );
+        info_progress.set_message(format!(
+            "Anyone may download with {}",
+            format!("distrans fetch {}", share_key)
+                .bold()
+                .bright_magenta()
+        ));
         seeder.seed(cancel.clone()).await?;
         seed_progress.finish();
 
