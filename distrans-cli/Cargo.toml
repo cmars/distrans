@@ -1,0 +1,40 @@
+[package]
+name = "distrans_cli"
+default-run = "distrans"
+description = "Anonymous decentralized file distribution and transfer"
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[package.metadata.wix]
+upgrade-guid = "B2D446B7-C4C2-4939-8A9E-C6039D89BAE8"
+path-guid = "F2AA53E2-105C-4A4F-BE29-C072AB5754A2"
+license = false
+eula = false
+
+[[bin]]
+name = "distrans"
+
+[dependencies]
+backoff = { workspace = true }
+clap = {version = "4.5.4", features = ["derive", "env"]}
+color-eyre = "0.6.3"
+dirs = "5.0.1"
+distrans_fileindex = { version = "0", path = "../distrans-fileindex" }
+distrans_peer = { version = "0", path = "../distrans-peer" }
+hex = "0.4.3"
+indicatif = { version = "0.17.8", features = ["tokio", "futures"] }
+tokio = { workspace = true }
+tokio-util = "0.7.10"
+tracing = { version = "0.1.40", features = ["log", "attributes"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+[target.'cfg(unix)'.dependencies]
+sha2 = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+sha2 = "0.10.8"

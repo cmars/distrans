@@ -87,7 +87,7 @@
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
-                <Directory Id='APPLICATIONFOLDER' Name='distrans'>
+                <Directory Id='APPLICATIONFOLDER' Name='distrans_cli'>
                     
                     <!--
                       Enabling the license sidecar file in the installer is a four step process:

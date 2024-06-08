@@ -31,3 +31,6 @@ name = "distrans_fileindex"
 
 [[package]]
 name = "distrans_peer"
+
+[[package]]
+name = "distrans_cli"

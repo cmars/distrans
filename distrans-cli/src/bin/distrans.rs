@@ -1,7 +1,7 @@
 use clap::Parser;
 use color_eyre::eyre::Result;
 
-use distrans::{App, Cli};
+use distrans_cli::{App, Cli};
 
 #[tokio::main]
 async fn main() -> Result<()> {
