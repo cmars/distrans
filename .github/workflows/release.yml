@@ -1,4 +1,4 @@
-# Copyright 2022-2023, axodotdev
+# Copyright 2022-2024, axodotdev
 # SPDX-License-Identifier: MIT or Apache-2.0
 #
 # CI that:
@@ -6,9 +6,9 @@
 # * checks for a Git Tag that looks like a release
 # * builds artifacts with cargo-dist (archives, installers, hashes)
 # * uploads those artifacts to temporary workflow zip
-# * on success, uploads the artifacts to a Github Release
+# * on success, uploads the artifacts to a GitHub Release
 #
-# Note that the Github Release will be created with a generated
+# Note that the GitHub Release will be created with a generated
 # title/body based on your changelogs.
 
 name: Release
@@ -31,22 +31,22 @@ permissions:
 # packages versioned/released in lockstep).
 #
 # If you push multiple tags at once, separate instances of this workflow will
-# spin up, creating an independent announcement for each one. However Github
+# spin up, creating an independent announcement for each one. However, GitHub
 # will hard limit this to 3 tags per commit, as it will assume more tags is a
 # mistake.
 #
 # If there's a prerelease-style suffix to the version, then the release(s)
 # will be marked as a prerelease.
 on:
+  pull_request:
   push:
     tags:
       - '**[0-9]+.[0-9]+.[0-9]+*'
-  pull_request:
 
 jobs:
   # Run 'cargo dist plan' (or host) to determine what tasks we need to do
   plan:
-    runs-on: ubuntu-latest
+    runs-on: "ubuntu-20.04"
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
       tag: ${{ !github.event.pull_request && github.ref_name || '' }}
@@ -105,10 +105,15 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
     steps:
+      - name: enable windows longpaths
+        run: |
+          git config --global core.longpaths true
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ join(matrix.targets, '-') }}
       - name: Install cargo-dist
         run: ${{ matrix.install_dist }}
       # Get the dist-manifest
@@ -135,7 +140,7 @@ jobs:
         run: |
           # Parse out what we just built and upload it to scratch storage
           echo "paths<<EOF" >> "$GITHUB_OUTPUT"
-          jq --raw-output ".artifacts[]?.path | select( . != null )" dist-manifest.json >> "$GITHUB_OUTPUT"
+          jq --raw-output ".upload_files[]" dist-manifest.json >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
@@ -152,7 +157,7 @@ jobs:
     needs:
       - plan
       - build-local-artifacts
-    runs-on: "ubuntu-22.04"
+    runs-on: "ubuntu-20.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json
@@ -178,7 +183,7 @@ jobs:
 
           # Parse out what we just built and upload it to scratch storage
           echo "paths<<EOF" >> "$GITHUB_OUTPUT"
-          jq --raw-output ".artifacts[]?.path | select( . != null )" dist-manifest.json >> "$GITHUB_OUTPUT"
+          jq --raw-output ".upload_files[]" dist-manifest.json >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
@@ -199,7 +204,7 @@ jobs:
     if: ${{ always() && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    runs-on: "ubuntu-22.04"
+    runs-on: "ubuntu-20.04"
     outputs:
       val: ${{ steps.host.outputs.manifest }}
     steps:
@@ -215,7 +220,7 @@ jobs:
           pattern: artifacts-*
           path: target/distrib/
           merge-multiple: true
-      # This is a harmless no-op for Github Releases, hosting for that happens in "announce"
+      # This is a harmless no-op for GitHub Releases, hosting for that happens in "announce"
       - id: host
         shell: bash
         run: |
@@ -230,24 +235,93 @@ jobs:
           name: artifacts-dist-manifest
           path: dist-manifest.json
 
-  # Create a Github Release while uploading all files to it
+  publish-homebrew-formula:
+    needs:
+      - plan
+      - host
+    runs-on: "ubuntu-20.04"
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PLAN: ${{ needs.plan.outputs.val }}
+      GITHUB_USER: "axo bot"
+      GITHUB_EMAIL: "admin+bot@axo.dev"
+    if: ${{ !fromJson(needs.plan.outputs.val).announcement_is_prerelease || fromJson(needs.plan.outputs.val).publish_prereleases }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: "cmars/homebrew-tap"
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      # So we have access to the formula
+      - name: Fetch homebrew formulae
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          path: Formula/
+          merge-multiple: true
+      # This is extra complex because you can make your Formula name not match your app name
+      # so we need to find releases with a *.rb file, and publish with that filename.
+      - name: Commit formula files
+        run: |
+          git config --global user.name "${GITHUB_USER}"
+          git config --global user.email "${GITHUB_EMAIL}"
+
+          for release in $(echo "$PLAN" | jq --compact-output '.releases[] | select([.artifacts[] | endswith(".rb")] | any)'); do
+            filename=$(echo "$release" | jq '.artifacts[] | select(endswith(".rb"))' --raw-output)
+            name=$(echo "$filename" | sed "s/\.rb$//")
+            version=$(echo "$release" | jq .app_version --raw-output)
+
+            git add "Formula/${filename}"
+            git commit -m "${name} ${version}"
+          done
+          git push
+
+  publish-npm:
+    needs:
+      - plan
+      - host
+    runs-on: "ubuntu-20.04"
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PLAN: ${{ needs.plan.outputs.val }}
+    if: ${{ !fromJson(needs.plan.outputs.val).announcement_is_prerelease || fromJson(needs.plan.outputs.val).publish_prereleases }}
+    steps:
+      - name: Fetch npm packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          path: npm/
+          merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          registry-url: 'https://registry.npmjs.org'
+      - run: |
+          for release in $(echo "$PLAN" | jq --compact-output '.releases[] | select([.artifacts[] | endswith("-npm-package.tar.gz")] | any)'); do
+            pkg=$(echo "$release" | jq '.artifacts[] | select(endswith("-npm-package.tar.gz"))' --raw-output)
+            npm publish --access public "./npm/${pkg}"
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Create a GitHub Release while uploading all files to it
   announce:
     needs:
       - plan
       - host
+      - publish-homebrew-formula
+      - publish-npm
     # use "always() && ..." to allow us to wait for all publish jobs while
     # still allowing individual publish jobs to skip themselves (for prereleases).
     # "host" however must run to completion, no skipping allowed!
-    # NOTE: customized to only publish Github releases for the workspace crate
-    if: ${{ always() && needs.host.result == 'success' && startsWith(github.ref_name, 'distrans-v') }}
-    runs-on: "ubuntu-22.04"
+    if: ${{ always() && needs.host.result == 'success' && (needs.publish-homebrew-formula.result == 'skipped' || needs.publish-homebrew-formula.result == 'success') && (needs.publish-npm.result == 'skipped' || needs.publish-npm.result == 'success') }}
+    runs-on: "ubuntu-20.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: "Download Github Artifacts"
+      - name: "Download GitHub Artifacts"
         uses: actions/download-artifact@v4
         with:
           pattern: artifacts-*
@@ -257,8 +331,8 @@ jobs:
         run: |
           # Remove the granular manifests
           rm -f artifacts/*-dist-manifest.json
-      - name: Create Github Release
-        uses: ncipollo/release-action@2c591bcc8ecdcd2db72b97d6147f871fcd833ba5
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
         with:
           tag: ${{ needs.plan.outputs.tag }}
           name: ${{ fromJson(needs.host.outputs.val).announcement_title }}

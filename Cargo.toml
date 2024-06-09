@@ -29,8 +29,6 @@ targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-
 pr-run-mode = "upload"
 # Where to host releases
 hosting = "github"
-# Skip checking whether the specified configuration files are up to date
-allow-dirty = ["ci", "msi"]
 # A GitHub repo to push Homebrew formulas to
 tap = "cmars/homebrew-tap"
 # The archive format to use for windows builds (defaults .zip)
