@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use backoff::{backoff::Backoff, ExponentialBackoff};
 use color_eyre::{eyre::Error, owo_colors::OwoColorize, Result};
@@ -172,7 +175,7 @@ impl App {
         fetch_progress.set_message(format!(
             "Fetching {} into {}",
             fetcher.file().bold().bright_cyan(),
-            root
+            PathBuf::from(root).canonicalize()?.to_string_lossy()
         ));
         let fetch_progress_spinner = fetch_progress.clone();
 
