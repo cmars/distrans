@@ -60,7 +60,7 @@
 
     <Product
         Id='*'
-        Name='distrans'
+        Name='distrans_cli'
         UpgradeCode='B2D446B7-C4C2-4939-8A9E-C6039D89BAE8'
         Manufacturer='Casey Marshall'
         Language='1033'
@@ -83,7 +83,7 @@
             DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
 
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
-        <Property Id='DiskPrompt' Value='distrans Installation'/>
+        <Property Id='DiskPrompt' Value='distrans_cli Installation'/>
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
