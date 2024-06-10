@@ -10,9 +10,14 @@ Distrans (distribution and transfer) sends and receives file content anonymously
 
 # Usage
 
+
 `distrans seed <file>` indexes and seeds a file, displaying the dht key which can be used to fetch it.
 
+[![asciicast](https://asciinema.org/a/663366.svg)](https://asciinema.org/a/663366)
+
 `distrans fetch <dht key> [directory]` fetches a file while it's being seeded (defaults to current directory).
+
+[![asciicast](https://asciinema.org/a/663367.svg)](https://asciinema.org/a/663367)
 
 Similar to bittorrent, distrans cannot fetch a file unless it's being seeded by a peer.
 
