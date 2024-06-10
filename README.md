@@ -1,6 +1,7 @@
 # distrans
 
-[![crates.io/crates/distrans](https://img.shields.io/crates/v/distrans.svg)](https://crates.io/crates/distrans)
+[![crates.io/crates/distrans_cli](https://img.shields.io/crates/v/distrans_cli.svg)](https://crates.io/crates/distrans_cli)
+[![docs.rs/distrans-fileindex](https://img.shields.io/docsrs/distrans_fileindex)](https://docs.rs/distrans-fileindex)
 [![docs.rs/distrans-peer](https://img.shields.io/docsrs/distrans_peer)](https://docs.rs/distrans-peer)
 [![MPL-2.0](https://img.shields.io/crates/l/distrans.svg)](./LICENSE)
 
