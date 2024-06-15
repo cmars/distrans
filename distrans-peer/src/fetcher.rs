@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use backoff::backoff::Backoff;
 use backoff::ExponentialBackoff;
-use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS, PIECE_SIZE_BYTES};
+use distrans_fileindex::{Index, Indexer, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS, PIECE_SIZE_BYTES};
 use flume::{unbounded, Receiver, Sender};
 use sha2::{Digest, Sha256};
 use tokio::fs::File;
@@ -111,9 +111,9 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
         let (fetch_tx, fetch_rx) = unbounded();
         let (verify_tx, verify_rx) = unbounded();
 
-        let index = self.index.clone();
         let done = CancellationToken::new();
-        Self::enqueue_blocks(cancel.clone(), fetch_tx.clone(), index).await?;
+        self.enqueue_blocks(cancel.clone(), fetch_tx.clone())
+            .await?;
         let mut verify_tasks = JoinSet::new();
         verify_tasks.spawn(Self::verify_blocks(
             self.index.clone(),
@@ -264,15 +264,15 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
         mut self,
         cancel: CancellationToken,
         done: CancellationToken,
-        fetch_block_sender: Sender<FileBlockFetch>,
-        fetch_block_receiver: Receiver<FileBlockFetch>,
-        verify_sender: Sender<PieceState>,
+        fetch_block_tx: Sender<FileBlockFetch>,
+        fetch_block_rx: Receiver<FileBlockFetch>,
+        verify_tx: Sender<PieceState>,
         task_id: u8,
     ) -> Result<()> {
         let mut fh_map: HashMap<usize, File> = HashMap::new();
         loop {
             tokio::select! {
-                recv_fetch = fetch_block_receiver.recv_async() => {
+                recv_fetch = fetch_block_rx.recv_async() => {
                     let fetch = match recv_fetch {
                         Ok(fetch) => fetch,
                         Err(e) => {
@@ -316,7 +316,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                         self.fetch_progress_tx.send_modify(|p| {
                             p.position += block_end as u64;
                         });
-                        verify_sender.send_async(PieceState::new(
+                        verify_tx.send_async(PieceState::new(
                             fetch.file_index,
                             fetch.piece_index,
                             fetch.piece_offset,
@@ -328,7 +328,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                         Ok(()) => {}
                         Err(ref e) => {
                             warn!(err = format!("{}", e), "fetch block failed, queued for retry");
-                            fetch_block_sender.send_async(fetch).await.map_err(Error::cancelled)?;
+                            fetch_block_tx.send_async(fetch).await.map_err(Error::cancelled)?;
                             if !e.is_route_invalid() {
                                 return fetch_result;
                             }
@@ -346,11 +346,22 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
     }
 
     async fn enqueue_blocks(
+        &self,
         cancel: CancellationToken,
         sender: Sender<FileBlockFetch>,
-        index: Index,
     ) -> Result<()> {
-        for (file_index, file_spec) in index.files().iter().enumerate() {
+        for (file_index, file_spec) in self.index.files().iter().enumerate() {
+            // TODO: establishing file-on-disk index will need to change for
+            // multifile. A single file index per-file will have different &
+            // less pieces than a packed multifile payload.
+            let maybe_existing = match Indexer::from_file(file_spec.path().into()).await {
+                Err(_) => None,
+                Ok(idxr) => match idxr.index().await {
+                    Err(_) => None,
+                    Ok(idx) => Some(idx),
+                },
+            };
+
             let mut piece_index = file_spec.contents().starting_piece();
             let mut piece_offset = file_spec.contents().piece_offset();
             let mut block_index = piece_offset / BLOCK_SIZE_BYTES;
@@ -359,6 +370,33 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                 if cancel.is_cancelled() {
                     return Err(Error::other("cancelled"));
                 }
+
+                if let Some(ref existing) = maybe_existing {
+                    if piece_index < existing.payload().pieces().len()
+                        && block_index == 0
+                        && piece_offset == 0
+                    {
+                        // We're on block 0 at the start of a piece. Compare
+                        // against existing index of what's on disk.
+                        let have_digest = existing.payload().pieces()[piece_index].digest();
+                        let want_digest = self.index.payload().pieces()[piece_index].digest();
+                        if have_digest == want_digest {
+                            // update fetch and verify progress watches
+                            self.fetch_progress_tx.send_modify(|p| {
+                                p.position += PIECE_SIZE_BYTES as u64;
+                            });
+                            self.verify_progress_tx.send_modify(|p| {
+                                p.position += 1;
+                            });
+
+                            // skip enqueuing this already fetched and verified piece
+                            piece_offset += 1;
+                            pos += PIECE_SIZE_BYTES;
+                            continue;
+                        }
+                    }
+                }
+
                 sender
                     .send(FileBlockFetch {
                         file_index,

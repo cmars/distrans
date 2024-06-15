@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use backoff::{backoff::Backoff, ExponentialBackoff};
 use color_eyre::{eyre::Error, owo_colors::OwoColorize, Result};
@@ -187,7 +184,7 @@ impl App {
         fetch_progress_bar.set_message("Fetching blocks");
         let verify_progress_bar = m.add(ProgressBar::new(0u64));
         verify_progress_bar.set_style(self.bar_style.clone());
-        verify_progress_bar.set_message("Verifying blocks");
+        verify_progress_bar.set_message("Verifying pieces");
         spawn(async move {
             loop {
                 select! {
