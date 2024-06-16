@@ -1,0 +1,6 @@
+# flyctl launch added from .gitignore
+target
+
+# flyctl launch added from distrans-peer/.gitignore
+distrans-peer/node*
+fly.toml

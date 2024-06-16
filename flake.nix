@@ -46,6 +46,7 @@
             protobuf
             pkg-config
             openssl
+            flyctl
           ]);
 
           LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib";

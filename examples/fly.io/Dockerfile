@@ -7,11 +7,12 @@ RUN awk '/^version =/ {print $3}' Cargo.toml | sed 's/"//g' > /distrans.version
 RUN curl --proto '=https' --tlsv1.2 -LsSf https://github.com/cmars/distrans/releases/download/distrans_cli-v$(cat /distrans.version)/distrans_cli-installer.sh | sh
 ENV PATH="$HOME/.cargo/bin:$PATH"
 
-VOLUME /share
 WORKDIR /share
+COPY examples/fly.io/secure-envelopes.png .
 
 VOLUME /state
 ENV STATE_DIR=/state
 
-ENTRYPOINT ["/root/.cargo/bin/distrans"]
-CMD ["distrans"]
+# TODO: fix cli app to tolerate not being in a tty. Without this bit of magic it seems to hang.
+ENTRYPOINT ["/bin/sh"]
+CMD ["-c", "script -qefc '/root/.cargo/bin/distrans seed /share/secure-envelopes.png'"]

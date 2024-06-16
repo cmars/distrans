@@ -26,7 +26,7 @@ See `distrans --help` for more options.
 
 ## Try it!
 
-Try fetching a test file with `distrans fetch VLD0:cCHB85pEaV4bvRfywxnd2fRNBScR64UaJC8hoKzyr3M`.
+Try fetching a test file with `distrans fetch VLD0:Jvbrv3Tlxr1E3J70rsbBtC5UlyCYUFsD0Pju_I47eCU`.
 
 # Install
 
