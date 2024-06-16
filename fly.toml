@@ -13,6 +13,24 @@ primary_region = 'dfw'
 [[vm]]
   size = 'shared-cpu-1x'
 
+[[services]]
+  internal_port = 5150
+  protocol = "udp"
+  [[services.ports]]
+    port = 5150
+
+[[services]]
+  internal_port = 5150
+  protocol = "tcp"
+  [[services.ports]]
+    port = 5150
+
+[[services.tcp_checks]]
+  grace_period = "5s"
+  interval = "60s"
+  restart_limit = 0
+  timeout = "10s"
+
 [mounts]
   source = "distrans-seed-demofile-data"
   destination = "/state"

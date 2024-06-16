@@ -1,6 +1,15 @@
-# flyctl launch added from .gitignore
-target
+**/target/
+**/.git/
+/media/
+/tools/
+/.github/
+/.vscode/
+/distrans-peer/stress-obs/
+/flake.*
+/CHANGELOG.md
+/release-plz.toml
+/cliff.toml
+Dockerfile
+/renovate.json
 
-# flyctl launch added from distrans-peer/.gitignore
-distrans-peer/node*
-fly.toml
+/fly.toml
