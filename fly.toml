@@ -1,38 +1,32 @@
-# fly.toml app configuration file generated for distrans-seed-demofile on 2024-06-16T12:08:57-05:00
+# fly.toml app configuration file generated for distrans-seed-demofile on 2024-06-16T23:01:52-05:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
-# This deployment hosts the example fetchable DHT shown in the README using a free-tier fly.io machine.
 
 app = 'distrans-seed-demofile'
 primary_region = 'dfw'
 
 [build]
-  dockerfile = "examples/fly.io/Dockerfile"
+  dockerfile = 'examples/fly.io/Dockerfile'
+
+[[mounts]]
+  source = 'distrans_seed_demofile_data'
+  destination = '/state'
+  initial_size = '1GB'
+
+[[services]]
+  protocol = 'udp'
+  internal_port = 5150
+
+  [[services.ports]]
+    port = 5150
+
+[[services]]
+  protocol = 'tcp'
+  internal_port = 5150
+
+  [[services.ports]]
+    port = 5150
 
 [[vm]]
   size = 'shared-cpu-1x'
-
-[[services]]
-  internal_port = 5150
-  protocol = "udp"
-  [[services.ports]]
-    port = 5150
-
-[[services]]
-  internal_port = 5150
-  protocol = "tcp"
-  [[services.ports]]
-    port = 5150
-
-[[services.tcp_checks]]
-  grace_period = "5s"
-  interval = "60s"
-  restart_limit = 0
-  timeout = "10s"
-
-[mounts]
-  source = "distrans-seed-demofile-data"
-  destination = "/state"
-  processes = ["disk"]
-  initial_size = "1GB"

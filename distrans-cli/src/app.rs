@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use backoff::{backoff::Backoff, ExponentialBackoff};
 use color_eyre::{eyre::Error, owo_colors::OwoColorize, Result};
@@ -12,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use distrans_peer::{new_routing_context, Fetcher, Observable, Peer, PeerState, Seeder, Veilid};
 
-use crate::{cli::Commands, initialize_ui_logging, Cli};
+use crate::{cli::Commands, initialize_stderr_logging, initialize_ui_logging, Cli};
 
 pub struct App {
     cli: Cli,
@@ -48,7 +45,11 @@ impl App {
             return Ok(());
         }
 
-        initialize_ui_logging(m.clone());
+        if self.cli.no_ui() {
+            initialize_stderr_logging()
+        } else {
+            initialize_ui_logging(m.clone());
+        }
 
         let mut peer = self.new_peer().await?;
         let cancel = CancellationToken::new();

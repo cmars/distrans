@@ -22,6 +22,4 @@ COPY --from=builder /src/examples/fly.io/secure-envelopes.png .
 VOLUME /state
 ENV STATE_DIR=/state
 
-# TODO: fix cli app to tolerate not being in a tty. Without this bit of magic it seems to hang.
-ENTRYPOINT ["/bin/sh"]
-CMD ["-c", "script -qefc '/distrans seed /share/secure-envelopes.png'"]
+ENTRYPOINT ["/distrans", "seed", "/share/secure-envelopes.png"]
