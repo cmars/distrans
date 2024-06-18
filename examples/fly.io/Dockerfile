@@ -22,4 +22,6 @@ COPY --from=builder /src/examples/fly.io/secure-envelopes.png .
 VOLUME /state
 ENV STATE_DIR=/state
 
+ENV RUST_LOG="veilid_core=debug,distrans=debug"
+
 ENTRYPOINT ["/distrans", "seed", "/share/secure-envelopes.png"]
