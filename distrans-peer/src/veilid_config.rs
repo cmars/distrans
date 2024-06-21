@@ -1,4 +1,13 @@
+use std::env;
+
 use veilid_core::{ConfigCallbackReturn, FourCC, TypedKeyGroup, TypedSecretGroup, VeilidAPIError};
+
+pub fn node_addr() -> Option<String> {
+    match env::var("NODE_ADDR") {
+        Ok(val) => Some(val),
+        Err(_) => None,
+    }
+}
 
 pub fn callback(state_dir: String, key: String) -> ConfigCallbackReturn {
     match key.as_str() {
@@ -80,12 +89,12 @@ pub fn callback(state_dir: String, key: String) -> ConfigCallbackReturn {
         "network.application.http.url" => Ok(Box::new(Option::<String>::None)),
         "network.protocol.udp.enabled" => Ok(Box::new(true)),
         "network.protocol.udp.socket_pool_size" => Ok(Box::new(16u32)),
-        "network.protocol.udp.listen_address" => Ok(Box::new(":5150".to_owned())),
+        "network.protocol.udp.listen_address" => Ok(Box::new(node_addr().unwrap_or("".to_owned()))),
         "network.protocol.udp.public_address" => Ok(Box::new(Option::<String>::None)),
         "network.protocol.tcp.connect" => Ok(Box::new(true)),
         "network.protocol.tcp.listen" => Ok(Box::new(true)),
         "network.protocol.tcp.max_connections" => Ok(Box::new(32u32)),
-        "network.protocol.tcp.listen_address" => Ok(Box::new(":5150".to_owned())),
+        "network.protocol.tcp.listen_address" => Ok(Box::new(node_addr().unwrap_or("".to_owned()))),
         "network.protocol.tcp.public_address" => Ok(Box::new(Option::<String>::None)),
         "network.protocol.ws.connect" => Ok(Box::new(false)),
         "network.protocol.ws.listen" => Ok(Box::new(false)),

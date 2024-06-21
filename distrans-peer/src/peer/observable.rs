@@ -125,17 +125,22 @@ impl<P: Peer + 'static> Peer for Observable<P> {
     async fn reset(&mut self) -> Result<()> {
         Self::update_progress(&self.peer_progress_tx, State::Connecting);
         self.peer.reset().await?;
-        select! {
-            wait_result = self.node_state_rx.wait_for(NodeState::is_connected) => {
-                if let Err(e) = wait_result {
-                    return Err(Error::other(e));
+        loop {
+            select! {
+                _ = self.node_state_rx.changed() => {
+                    let node_state = *self.node_state_rx.borrow_and_update();
+                    if node_state.is_connected() {
+                        Self::update_progress(&self.peer_progress_tx, State::Connected);
+                        return Ok(());
+                    }
+                    if let NodeState::NetworkNotAvailable = node_state {
+                        return Err(Error::Node { state: node_state, err: veilid_core::VeilidAPIError::NoConnection { message: "not connected".to_string() } })
+                    }
                 }
-                Self::update_progress(&self.peer_progress_tx, State::Connected);
-                return Ok(());
-            }
-            _ = sleep(Self::DEFAULT_RESET_TIMEOUT) => {
-                Self::update_progress(&self.peer_progress_tx, State::Down);
-                return Err(Error::ResetTimeout);
+                _ = sleep(Self::DEFAULT_RESET_TIMEOUT) => {
+                    Self::update_progress(&self.peer_progress_tx, State::Down);
+                    return Err(Error::ResetTimeout);
+                }
             }
         }
     }

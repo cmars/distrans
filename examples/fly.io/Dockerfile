@@ -23,5 +23,6 @@ VOLUME /state
 ENV STATE_DIR=/state
 
 ENV RUST_LOG="veilid_core=debug,distrans=debug"
+ENV NODE_ADDR=":5150"
 
 ENTRYPOINT ["/distrans", "seed", "/share/secure-envelopes.png"]
