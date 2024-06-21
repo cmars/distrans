@@ -183,7 +183,7 @@ impl Error {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum NodeState {
     APINotStarted,
     NetworkNotAvailable,
@@ -195,8 +195,8 @@ pub enum NodeState {
 }
 
 impl NodeState {
-    pub fn is_connected(node_state: &Self) -> bool {
-        *node_state == NodeState::Connected
+    pub fn is_connected(&self) -> bool {
+        *self == NodeState::Connected
     }
 }
 

@@ -8,6 +8,7 @@ use tokio::{select, spawn, time::sleep};
 use tokio_util::sync::CancellationToken;
 
 use distrans_peer::{new_routing_context, Fetcher, Observable, Peer, PeerState, Seeder, Veilid};
+use tracing::error;
 
 use crate::{cli::Commands, initialize_stderr_logging, initialize_ui_logging, Cli};
 
@@ -106,6 +107,7 @@ impl App {
             let result = peer.reset().await;
             if let Err(e) = result {
                 if !e.is_resetable() {
+                    error!(err = format!("{}", e), "not resetable");
                     cancel.cancel();
                     return Err(e.into());
                 }
@@ -118,8 +120,9 @@ impl App {
                         );
                     }
                 }
+            } else {
+                break;
             }
-            break;
         }
 
         let ctrl_c_cancel = cancel.clone();
