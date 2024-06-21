@@ -15,6 +15,9 @@ pub struct Cli {
     #[arg(long, env)]
     pub state_dir: Option<String>,
 
+    #[arg(env)]
+    pub node_addr: Option<String>,
+
     #[command(subcommand)]
     pub commands: Commands,
 }
