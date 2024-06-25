@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use backoff::{backoff::Backoff, ExponentialBackoff};
+use backoff::backoff::Backoff;
 use path_absolutize::*;
 use tokio::{
     fs::File,
@@ -15,7 +15,7 @@ use veilid_core::{Target, VeilidAPIError, VeilidUpdate};
 
 use distrans_fileindex::{Index, Indexer, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS};
 
-use crate::proto::Header;
+use crate::{peer::with_backoff_reset, proto::Header, reset_with_backoff};
 use crate::{
     peer::{Peer, ShareKey},
     proto::decode_block_request,
@@ -32,7 +32,7 @@ pub struct Seeder<P: Peer> {
 
 impl<P: Peer> Seeder<P> {
     pub async fn new(mut peer: P, index: Index) -> Result<Seeder<P>> {
-        let (share_key, target, header) = peer.announce(&index).await?;
+        let (share_key, target, header) = with_backoff_reset!(peer, peer.announce(&index).await)?;
         Ok(Seeder {
             peer,
             index,
@@ -95,24 +95,14 @@ impl<P: Peer> Seeder<P> {
                         else if e.is_resetable() {
                             update_err_tx.send(Err(e)).map_err(Error::other)?;
                         }
+                        else if e.is_shutdown() {
+                            return Err(e);
+                        }
                     }
                 }
                 _ = update_err_rx.changed() => {
                     // Reset the peer
-                    let mut backoff = ExponentialBackoff::default();
-                    loop {
-                        let result = self.peer.reset().await;
-                        if let Err(e) = result {
-                            if !e.is_resetable() {
-                                return Err(e);
-                            }
-                            match backoff.next_backoff() {
-                                Some(delay) => sleep(delay).await,
-                                None => return Err(Error::other("peer reset retries exceeded")),
-                            }
-                        }
-                        break;
-                    }
+                    reset_with_backoff(&mut self.peer, &cancel).await?;
 
                     // Attempt to reannounce the route
                     if let Err(e) = self.reannounce_route().await {
@@ -176,15 +166,17 @@ impl<P: Peer> Seeder<P> {
     }
 
     async fn reannounce_route(&mut self) -> Result<()> {
-        let (target, header) = self
-            .peer
-            .reannounce_route(
-                &self.share_key,
-                Some(self.target.to_owned()),
-                &self.index,
-                &self.header,
-            )
-            .await?;
+        let (target, header) = with_backoff_reset!(
+            self.peer,
+            self.peer
+                .reannounce_route(
+                    &self.share_key,
+                    Some(self.target.to_owned()),
+                    &self.index,
+                    &self.header,
+                )
+                .await
+        )?;
         self.target = target;
         self.header = header;
         Ok(())
@@ -301,6 +293,7 @@ mod tests {
             update_tx_internal
                 .send(VeilidUpdate::Shutdown)
                 .expect("shutdown");
+
             Ok::<(), Error>(())
         });
         let result = seeder.seed(cancel).await;

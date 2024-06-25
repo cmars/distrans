@@ -4,7 +4,7 @@ use distrans_fileindex::Index;
 use tokio::{
     select,
     sync::{broadcast::Receiver, watch},
-    time::sleep,
+    time::interval,
 };
 use tracing::{debug, instrument, warn};
 use veilid_core::{OperationId, Target, VeilidUpdate};
@@ -68,29 +68,15 @@ impl<P: Peer + 'static> Observable<P> {
         loop {
             let update = updates.recv().await.map_err(Error::other)?;
             match update {
-                VeilidUpdate::Attachment(attachment) => {
-                    let is_attach = match attachment.state {
-                        veilid_core::AttachmentState::Detached => false,
-                        veilid_core::AttachmentState::Attaching => true,
-                        veilid_core::AttachmentState::AttachedWeak => true,
-                        veilid_core::AttachmentState::AttachedGood => true,
-                        veilid_core::AttachmentState::AttachedStrong => true,
-                        veilid_core::AttachmentState::FullyAttached => true,
-                        veilid_core::AttachmentState::OverAttached => true,
-                        _ => false,
-                    };
-                    let updated_state = if attachment.public_internet_ready {
-                        NodeState::Connected
-                    } else if is_attach {
-                        NodeState::Connecting
-                    } else {
-                        NodeState::NetworkNotAvailable
-                    };
+                VeilidUpdate::Attachment(ref attachment) => {
+                    let updated_state = NodeState::from(attachment);
                     debug!(
                         state = format!("{}", updated_state),
                         attachment = format!("{:?}", attachment)
                     );
-                    tx.send(updated_state).map_err(Error::other)?;
+                    tx.send_modify(|current_state| {
+                        *current_state = updated_state;
+                    });
                 }
                 VeilidUpdate::Shutdown => {
                     debug!(state = format!("{}", NodeState::APIShuttingDown));
@@ -125,19 +111,18 @@ impl<P: Peer + 'static> Peer for Observable<P> {
     async fn reset(&mut self) -> Result<()> {
         Self::update_progress(&self.peer_progress_tx, State::Connecting);
         self.peer.reset().await?;
+        let mut timer = interval(Self::DEFAULT_RESET_TIMEOUT);
+        timer.tick().await; // discard immediate tick
         loop {
             select! {
-                _ = self.node_state_rx.changed() => {
-                    let node_state = *self.node_state_rx.borrow_and_update();
-                    if node_state.is_connected() {
+                wait_result = self.node_state_rx.wait_for(|ns| ns.is_connected()) => {
+                    if let Ok(_) = wait_result {
                         Self::update_progress(&self.peer_progress_tx, State::Connected);
                         return Ok(());
                     }
-                    if let NodeState::NetworkNotAvailable = node_state {
-                        return Err(Error::Node { state: node_state, err: veilid_core::VeilidAPIError::NoConnection { message: "not connected".to_string() } })
-                    }
+                    continue;
                 }
-                _ = sleep(Self::DEFAULT_RESET_TIMEOUT) => {
+                _ = timer.tick() => {
                     Self::update_progress(&self.peer_progress_tx, State::Down);
                     return Err(Error::ResetTimeout);
                 }

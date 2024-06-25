@@ -1,6 +1,6 @@
 use std::{array::TryFromSliceError, fmt, io, num::TryFromIntError, path::PathBuf};
 
-use veilid_core::VeilidAPIError;
+use veilid_core::{VeilidAPIError, VeilidStateAttachment};
 
 use crate::proto;
 
@@ -175,10 +175,19 @@ impl Error {
             },
             Error::Fault(err) => match err {
                 Unexpected::Veilid(VeilidAPIError::Unimplemented { message: _ }) => false,
+                Unexpected::Veilid(VeilidAPIError::Shutdown) => false,
                 Unexpected::Veilid(_) => true,
                 _ => false,
             },
             _ => true,
+        }
+    }
+
+    pub fn is_shutdown(&self) -> bool {
+        if let Error::Fault(Unexpected::Veilid(VeilidAPIError::Shutdown)) = self {
+            true
+        } else {
+            false
         }
     }
 }
@@ -197,6 +206,28 @@ pub enum NodeState {
 impl NodeState {
     pub fn is_connected(&self) -> bool {
         *self == NodeState::Connected
+    }
+}
+
+impl From<&Box<VeilidStateAttachment>> for NodeState {
+    fn from(attachment: &Box<VeilidStateAttachment>) -> NodeState {
+        let is_attach = match attachment.state {
+            veilid_core::AttachmentState::Detached => false,
+            veilid_core::AttachmentState::Attaching => true,
+            veilid_core::AttachmentState::AttachedWeak => true,
+            veilid_core::AttachmentState::AttachedGood => true,
+            veilid_core::AttachmentState::AttachedStrong => true,
+            veilid_core::AttachmentState::FullyAttached => true,
+            veilid_core::AttachmentState::OverAttached => true,
+            _ => false,
+        };
+        if attachment.public_internet_ready {
+            NodeState::Connected
+        } else if is_attach {
+            NodeState::Connecting
+        } else {
+            NodeState::NetworkNotAvailable
+        }
     }
 }
 
