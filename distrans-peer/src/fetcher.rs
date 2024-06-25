@@ -4,8 +4,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use backoff::backoff::Backoff;
-use backoff::ExponentialBackoff;
-use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS, PIECE_SIZE_BYTES};
 use flume::{unbounded, Receiver, Sender};
 use sha2::{Digest, Sha256};
 use tokio::fs::File;
@@ -18,10 +16,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, trace, warn};
 use veilid_core::{FromStr, Target, TypedKey};
 
+use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS, PIECE_SIZE_BYTES};
+
 use crate::error::Unexpected;
-use crate::peer::{Peer, ShareKey};
+use crate::peer::{with_backoff_reset, with_backoff_retry, Peer, ShareKey};
 use crate::proto::Header;
-use crate::{Error, Result};
+use crate::{reset_with_backoff, Error, Result};
 
 const N_FETCHERS: u8 = 20;
 
@@ -66,7 +66,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
     pub async fn from_dht(mut peer: P, share_key_str: &str, root: &str) -> Result<Fetcher<P>> {
         let share_key = TypedKey::from_str(share_key_str)?;
         let root_path_buf = PathBuf::from_str(root).unwrap();
-        let (target, header, index) = peer.resolve(&share_key, &root_path_buf).await?;
+        let (target, header, index) = with_backoff_reset!(peer, peer.resolve(&share_key, &root_path_buf).await)?;
         let (fetch_progress_tx, _) = watch::channel(Progress {
             length: index.payload().length() as u64,
             position: 0u64,
@@ -195,25 +195,11 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                             }
 
                             // Reset the peer
-                            let mut backoff = ExponentialBackoff::default();
-                            loop {
-                                let result = self.peer.reset().await;
-                                if let Err(e) = result {
-                                    if !e.is_resetable() {
-                                        done.cancel();
-                                        return Err(e);
-                                    }
-                                    match backoff.next_backoff() {
-                                        Some(delay) => sleep(delay).await,
-                                        None => return Err(Error::other("peer reset retries exceeded")),
-                                    }
-                                }
-                                break;
-                            }
+                            reset_with_backoff(&mut self.peer, &done).await?;
 
                             // Attempt to re-resolve the route
                             let mut route = self.route.write().await;
-                            match self.peer.reresolve_route(&self.share_key, None).await {
+                            match with_backoff_retry!(self.peer.reresolve_route(&self.share_key, None).await) {
                                 Ok((target, header)) => *route = (target, header),
                                 Err(e) => warn!(err = format!("{}", e), "failed to re-resolve route"),
                             };
@@ -285,15 +271,15 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                     let fetch_result: Result<()> = async {
                         // Request block from peer
                         let target = self.route.read().await.0.clone();
-                        let result = self.peer.request_block(
+                        let result = with_backoff_retry!(self.peer.request_block(
                             target.clone(),
                             fetch.piece_index,
                             fetch.block_index,
-                        ).await;
+                        ).await);
                         if let Err(e) = result {
                             let mut route = self.route.write().await;
                             if e.is_route_invalid() {
-                                let (target, header) = self.peer.reresolve_route(&self.share_key, Some(target)).await?;
+                                let (target, header) = with_backoff_reset!(self.peer, self.peer.reresolve_route(&self.share_key, Some(target)).await)?;
                                 *route = (target, header);
                             }
                             return Err(e);
