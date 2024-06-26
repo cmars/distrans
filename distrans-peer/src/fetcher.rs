@@ -13,7 +13,7 @@ use tokio::sync::{watch, RwLock};
 use tokio::task::JoinSet;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 use veilid_core::{FromStr, Target, TypedKey};
 
 use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS, PIECE_SIZE_BYTES};
@@ -29,7 +29,8 @@ pub struct Fetcher<P: Peer> {
     peer: P,
     share_key: ShareKey,
     route: Arc<RwLock<(Target, Header)>>,
-    index: Index,
+    have_index: Index,
+    want_index: Index,
     fetch_progress_tx: watch::Sender<Progress>,
     verify_progress_tx: watch::Sender<Progress>,
 }
@@ -55,7 +56,8 @@ impl<P: Peer> Clone for Fetcher<P> {
             peer: self.peer.clone(),
             share_key: self.share_key.clone(),
             route: Arc::clone(&self.route),
-            index: self.index.clone(),
+            have_index: self.have_index.clone(),
+            want_index: self.want_index.clone(),
             fetch_progress_tx: self.fetch_progress_tx.clone(),
             verify_progress_tx: self.verify_progress_tx.clone(),
         }
@@ -66,13 +68,14 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
     pub async fn from_dht(mut peer: P, share_key_str: &str, root: &str) -> Result<Fetcher<P>> {
         let share_key = TypedKey::from_str(share_key_str)?;
         let root_path_buf = PathBuf::from_str(root).unwrap();
-        let (target, header, index) = with_backoff_reset!(peer, peer.resolve(&share_key, &root_path_buf).await)?;
+        let (target, header, want_index) =
+            with_backoff_reset!(peer, peer.resolve(&share_key, &root_path_buf).await)?;
         let (fetch_progress_tx, _) = watch::channel(Progress {
-            length: index.payload().length() as u64,
+            length: want_index.payload().length() as u64,
             position: 0u64,
         });
         let (verify_progress_tx, _) = watch::channel(Progress {
-            length: index.payload().pieces().len() as u64,
+            length: want_index.payload().pieces().len() as u64,
             position: 0u64,
         });
 
@@ -80,10 +83,19 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
             peer,
             share_key,
             route: Arc::new(RwLock::new((target, header))),
-            index,
+            have_index: want_index.empty(),
+            want_index,
             fetch_progress_tx,
             verify_progress_tx,
         })
+    }
+
+    pub fn set_have_index(&mut self, have_index: Index) {
+        self.have_index = have_index;
+    }
+
+    pub fn want_index(&self) -> &Index {
+        return &self.want_index;
     }
 
     pub fn subscribe_fetch_progress(&self) -> watch::Receiver<Progress> {
@@ -95,7 +107,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
     }
 
     pub fn file(&self) -> String {
-        self.index
+        self.want_index
             .files()
             .iter()
             .map(|f| f.path().to_str().unwrap_or("").to_string())
@@ -104,19 +116,19 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
     }
 
     pub fn digest(&self) -> String {
-        hex::encode(self.index.payload().digest())
+        hex::encode(self.want_index.payload().digest())
     }
 
     pub async fn fetch(mut self, cancel: CancellationToken) -> Result<()> {
         let (fetch_tx, fetch_rx) = unbounded();
         let (verify_tx, verify_rx) = unbounded();
 
-        let index = self.index.clone();
         let done = CancellationToken::new();
-        Self::enqueue_blocks(cancel.clone(), fetch_tx.clone(), index).await?;
+        self.enqueue_blocks(fetch_tx.clone(), verify_tx.clone(), done.clone())
+            .await?;
         let mut verify_tasks = JoinSet::new();
         verify_tasks.spawn(Self::verify_blocks(
-            self.index.clone(),
+            self.want_index.clone(),
             cancel.clone(),
             done.clone(),
             fetch_tx.clone(),
@@ -250,15 +262,15 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
         mut self,
         cancel: CancellationToken,
         done: CancellationToken,
-        fetch_block_sender: Sender<FileBlockFetch>,
-        fetch_block_receiver: Receiver<FileBlockFetch>,
-        verify_sender: Sender<PieceState>,
+        fetch_block_tx: Sender<FileBlockFetch>,
+        fetch_block_rx: Receiver<FileBlockFetch>,
+        verify_tx: Sender<PieceState>,
         task_id: u8,
     ) -> Result<()> {
         let mut fh_map: HashMap<usize, File> = HashMap::new();
         loop {
             tokio::select! {
-                recv_fetch = fetch_block_receiver.recv_async() => {
+                recv_fetch = fetch_block_rx.recv_async() => {
                     let fetch = match recv_fetch {
                         Ok(fetch) => fetch,
                         Err(e) => {
@@ -290,7 +302,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                         let fh = match fh_map.get_mut(&fetch.file_index) {
                             Some(fh) => fh,
                             None => {
-                                let path = self.index.root().join(self.index.files()[fetch.file_index].path());
+                                let path = self.want_index.root().join(self.want_index.files()[fetch.file_index].path());
                                 let fh = File::options().write(true).truncate(false).create(true).open(path).await?;
                                 fh_map.insert(fetch.file_index, fh);
                                 fh_map.get_mut(&fetch.file_index).unwrap()
@@ -302,11 +314,11 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                         self.fetch_progress_tx.send_modify(|p| {
                             p.position += block_end as u64;
                         });
-                        verify_sender.send_async(PieceState::new(
+                        verify_tx.send_async(PieceState::new(
                             fetch.file_index,
                             fetch.piece_index,
                             fetch.piece_offset,
-                            self.index.payload().pieces()[fetch.piece_index].block_count(),
+                            self.want_index.payload().pieces()[fetch.piece_index].block_count(),
                             fetch.block_index)).await.map_err(Error::cancelled)?;
                         Ok(())
                     }.await;
@@ -314,7 +326,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                         Ok(()) => {}
                         Err(ref e) => {
                             warn!(err = format!("{}", e), "fetch block failed, queued for retry");
-                            fetch_block_sender.send_async(fetch).await.map_err(Error::cancelled)?;
+                            fetch_block_tx.send_async(fetch).await.map_err(Error::cancelled)?;
                             if !e.is_route_invalid() {
                                 return fetch_result;
                             }
@@ -332,35 +344,44 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
     }
 
     async fn enqueue_blocks(
-        cancel: CancellationToken,
-        sender: Sender<FileBlockFetch>,
-        index: Index,
+        &self,
+        fetch_tx: Sender<FileBlockFetch>,
+        verify_tx: Sender<PieceState>,
+        done: CancellationToken,
     ) -> Result<()> {
-        for (file_index, file_spec) in index.files().iter().enumerate() {
-            let mut piece_index = file_spec.contents().starting_piece();
-            let mut piece_offset = file_spec.contents().piece_offset();
-            let mut block_index = piece_offset / BLOCK_SIZE_BYTES;
-            let mut pos = 0;
-            while pos < file_spec.contents().length() {
-                if cancel.is_cancelled() {
-                    return Err(Error::other("cancelled"));
-                }
-                sender
-                    .send(FileBlockFetch {
-                        file_index,
-                        piece_index,
-                        piece_offset,
-                        block_index,
-                    })
-                    .map_err(Error::cancelled)?;
-                pos += BLOCK_SIZE_BYTES - piece_offset;
-                piece_offset = 0;
-                block_index += 1;
-                if block_index == PIECE_SIZE_BLOCKS {
-                    piece_index += 1;
-                    block_index = 0;
-                }
-            }
+        let diff = self.want_index.diff(&self.have_index);
+        let mut want_length = 0;
+        for want_block in diff.want {
+            fetch_tx
+                .send(FileBlockFetch {
+                    file_index: want_block.file_index,
+                    piece_index: want_block.piece_index,
+                    piece_offset: want_block.piece_offset,
+                    block_index: want_block.block_index,
+                })
+                .map_err(Error::cancelled)?;
+            want_length += want_block.block_length;
+        }
+        let mut have_length = 0;
+        for have_block in diff.have {
+            verify_tx
+                .send(PieceState::new(
+                    have_block.file_index,
+                    have_block.piece_index,
+                    have_block.piece_offset,
+                    self.want_index.payload().pieces()[have_block.piece_index].block_count(),
+                    have_block.block_index,
+                ))
+                .map_err(Error::other)?;
+            self.fetch_progress_tx
+                .send_modify(|p| p.position += have_block.block_length as u64);
+            have_length += have_block.block_length;
+        }
+        debug!(want_length, have_length);
+        // If we have everything we need, flag the fetch as done. Otherwise
+        // fetch_block workers will hang on channels.
+        if want_length == 0 {
+            done.cancel()
         }
         Ok(())
     }
@@ -369,15 +390,15 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
         index: Index,
         cancel: CancellationToken,
         done: CancellationToken,
-        fetch_block_sender: Sender<FileBlockFetch>,
-        verify_receiver: Receiver<PieceState>,
+        fetch_block_tx: Sender<FileBlockFetch>,
+        verify_rx: Receiver<PieceState>,
         verify_progress_tx: watch::Sender<Progress>,
     ) -> Result<()> {
         let mut piece_states: HashMap<(usize, usize), PieceState> = HashMap::new();
         let mut verified_pieces = 0;
         loop {
             tokio::select! {
-                recv_verify = verify_receiver.recv_async() => {
+                recv_verify = verify_rx.recv_async() => {
                     // select on verify receiver
                     let mut to_verify = match recv_verify {
                         Ok(verify) => verify,
@@ -416,7 +437,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                                 index.payload().pieces()[to_verify.piece_index].block_count(),
                             ));
                             for block_index in 0..32  {
-                                fetch_block_sender.send_async(FileBlockFetch{
+                                fetch_block_tx.send_async(FileBlockFetch{
                                     file_index: to_verify.file_index,
                                     piece_index: to_verify.piece_index,
                                     piece_offset: to_verify.piece_offset,
