@@ -15,6 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 flume = "0.11"
+num_cpus = "1.16.0"
 thiserror = "1.0.59"
 tokio = { workspace = true }
 

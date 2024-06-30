@@ -1,12 +1,13 @@
 use std::{
     cmp::min,
+    collections::HashMap,
     path::{Path, PathBuf},
 };
 
 use flume::{unbounded, Receiver, Sender};
 use sha2::{Digest, Sha256};
 use tokio::{
-    fs::File,
+    fs::{File, OpenOptions},
     io::{AsyncReadExt, AsyncSeekExt},
     select, spawn,
     sync::watch,
@@ -49,6 +50,137 @@ impl Index {
     pub fn files(&self) -> &Vec<FileSpec> {
         return &self.files;
     }
+
+    pub fn empty(&self) -> Index {
+        Index::empty_root(&self.root)
+    }
+
+    pub fn empty_root(root: &Path) -> Index {
+        Index {
+            root: root.into(),
+            payload: PayloadSpec {
+                digest: [0u8; 32],
+                length: 0,
+                pieces: vec![],
+            },
+            files: vec![],
+        }
+    }
+
+    /// diff reconciles an index calculated over actual filesystem state with
+    /// desired filesystem state, returning the file blocks that are missing or
+    /// incomplete.
+    pub fn diff(&self, have: &Index) -> IndexDiff {
+        let mut want_file_blocks = vec![];
+        let mut have_file_blocks = vec![];
+        let have_files_map: HashMap<&Path, &FileSpec> =
+            have.files.iter().map(|f| (f.path(), f)).collect();
+
+        for (want_file_index, want_file) in self.files.iter().enumerate() {
+            if let Some(_) = have_files_map.get(want_file.path()) {
+                // Compare pieces considering the PayloadSlice
+                let want_pieces = self.payload.pieces();
+                let have_pieces = have.payload.pieces();
+                let want_slice = want_file.contents();
+
+                for piece_index in want_slice.starting_piece
+                    ..(want_slice.starting_piece
+                        + (want_slice.length / PIECE_SIZE_BYTES)
+                        + if want_slice.length % PIECE_SIZE_BYTES > 0 {
+                            1
+                        } else {
+                            0
+                        })
+                {
+                    // TODO: Deal with payload slices that have a non-zero piece
+                    // offset. This becomes a concern with multi-file indexes,
+                    // where payload slices might not be aligned to piece
+                    // boundaries.
+                    if let Some(want_piece) = want_pieces.get(piece_index) {
+                        if let Some(have_piece) = have_pieces.get(piece_index) {
+                            if want_piece.digest() != have_piece.digest() {
+                                let mut piece_position = 0;
+                                for block_index in 0..want_piece.block_count() {
+                                    let block_length =
+                                        min(want_piece.length() - piece_position, BLOCK_SIZE_BYTES);
+                                    want_file_blocks.push(FileBlockRef {
+                                        file_index: want_file_index,
+                                        piece_index,
+                                        piece_offset: 0,
+                                        block_index,
+                                        block_length,
+                                    });
+                                    piece_position += block_length;
+                                }
+                            } else {
+                                let mut piece_position = 0;
+                                for block_index in 0..want_piece.block_count() {
+                                    let block_length =
+                                        min(want_piece.length() - piece_position, BLOCK_SIZE_BYTES);
+                                    have_file_blocks.push(FileBlockRef {
+                                        file_index: want_file_index,
+                                        piece_index,
+                                        piece_offset: 0,
+                                        block_index,
+                                        block_length,
+                                    });
+                                    piece_position += block_length;
+                                }
+                            }
+                        } else {
+                            let mut piece_position = 0;
+                            for block_index in 0..want_piece.block_count() {
+                                let block_length =
+                                    min(want_piece.length() - piece_position, BLOCK_SIZE_BYTES);
+                                want_file_blocks.push(FileBlockRef {
+                                    file_index: want_file_index,
+                                    piece_index,
+                                    piece_offset: 0,
+                                    block_index,
+                                    block_length,
+                                });
+                                piece_position += block_length;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // File is missing, add all blocks
+                for (piece_index, piece) in self.payload.pieces().iter().enumerate() {
+                    let mut piece_position = 0;
+                    let piece_length = piece.length();
+                    for block_index in 0..piece.block_count() {
+                        let block_length = min(piece_length - piece_position, BLOCK_SIZE_BYTES);
+                        want_file_blocks.push(FileBlockRef {
+                            file_index: want_file_index,
+                            piece_index,
+                            piece_offset: 0,
+                            block_index,
+                            block_length,
+                        });
+                        piece_position += block_length;
+                    }
+                }
+            }
+        }
+        IndexDiff {
+            want: want_file_blocks,
+            have: have_file_blocks,
+        }
+    }
+}
+
+pub struct IndexDiff {
+    pub want: Vec<FileBlockRef>,
+    pub have: Vec<FileBlockRef>,
+}
+
+pub struct FileBlockRef {
+    pub file_index: usize,
+    pub piece_index: usize,
+    pub piece_offset: usize,
+    pub block_index: usize,
+    pub block_length: usize,
 }
 
 #[derive(Clone)]
@@ -72,6 +204,19 @@ pub struct Indexer {
 
     digest_progress_tx: watch::Sender<Progress>,
     index_progress_tx: watch::Sender<Progress>,
+}
+
+impl Default for Indexer {
+    fn default() -> Self {
+        let (digest_progress_tx, _) = watch::channel(Progress::default());
+        let (index_progress_tx, _) = watch::channel(Progress::default());
+        Self {
+            root_dir: Default::default(),
+            files: Default::default(),
+            digest_progress_tx,
+            index_progress_tx,
+        }
+    }
 }
 
 impl Indexer {
@@ -104,6 +249,36 @@ impl Indexer {
         })
     }
 
+    pub async fn from_wanted(want: &Index) -> Result<Indexer> {
+        if want.files.is_empty() {
+            return Ok(Indexer::default());
+        }
+        if want.files.len() != 1 {
+            unimplemented!("number of files > 1");
+        }
+
+        let file_path = want.root.join(want.files[0].path());
+        let file_len = want.files[0].contents().length() as u64;
+        if let Ok(_) = async {
+            // Truncate an existing file to the wanted file length
+            let fh = OpenOptions::new()
+                .write(true)
+                .append(true)
+                .open(&file_path)
+                .await?;
+            if fh.metadata().await?.len() > file_len {
+                fh.set_len(file_len).await?;
+            }
+            Ok::<(), Error>(())
+        }
+        .await
+        {
+            Indexer::from_file(file_path).await
+        } else {
+            Ok(Indexer::default())
+        }
+    }
+
     pub fn subscribe_digest_progress(&self) -> watch::Receiver<Progress> {
         self.digest_progress_tx.subscribe()
     }
@@ -113,8 +288,19 @@ impl Indexer {
     }
 
     pub async fn index(&self) -> Result<Index> {
+        if self.files.is_empty() {
+            self.index_progress_tx.send_modify(|p| {
+                p.length = 0;
+                p.position = 0;
+            });
+            self.digest_progress_tx.send_modify(|p| {
+                p.length = 0;
+                p.position = 0;
+            });
+            return Ok(Index::empty_root(&self.root_dir));
+        }
         if self.files.len() != 1 {
-            unimplemented!("number of files != 1");
+            unimplemented!("number of files > 1");
         }
         let resolved_file = self.files[0].to_owned();
         let payload = self.index_spec(&resolved_file).await?;
@@ -166,7 +352,7 @@ impl Indexer {
         }
         task_tx.send_async(None).await.map_err(other_err)?;
 
-        for _ in 0..n_tasks {
+        for _ in 0..num_cpus::get() {
             scanners.spawn(Self::scan(
                 task_tx.clone(),
                 task_rx.clone(),
@@ -458,7 +644,7 @@ impl PayloadPiece {
 }
 
 #[cfg(test)]
-mod tests {
+mod from_file_tests {
     use std::io::Write;
 
     use hex_literal::hex;
@@ -585,5 +771,140 @@ mod tests {
                 length: 134217728,
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod want_have_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    // Helper function to create an Index with a single file
+    fn create_index(root: PathBuf, file_path: PathBuf, piece_digests: Vec<[u8; 32]>) -> Index {
+        let pieces: Vec<PayloadPiece> = piece_digests
+            .into_iter()
+            .map(|digest| PayloadPiece {
+                digest,
+                length: PIECE_SIZE_BYTES,
+            })
+            .collect();
+        let payload = PayloadSpec {
+            digest: [0; 32], // Placeholder, not used in this test
+            length: pieces.len() * PIECE_SIZE_BYTES,
+            pieces,
+        };
+        let file_spec = FileSpec {
+            path: file_path,
+            contents: PayloadSlice {
+                starting_piece: 0,
+                piece_offset: 0,
+                length: payload.length,
+            },
+        };
+        Index {
+            root,
+            payload,
+            files: vec![file_spec],
+        }
+    }
+
+    fn create_index_partial_block(
+        root: PathBuf,
+        file_path: PathBuf,
+        piece_digests: Vec<[u8; 32]>,
+    ) -> Index {
+        let pieces: Vec<PayloadPiece> = piece_digests
+            .into_iter()
+            .map(|digest| PayloadPiece {
+                digest,
+                length: PIECE_SIZE_BYTES,
+            })
+            .collect();
+        assert!(!pieces.is_empty());
+        let payload = PayloadSpec {
+            digest: [0; 32], // Placeholder, not used in this test
+            // Same number of pieces, but the last block is short a byte.
+            length: ((pieces.len() - 1) * PIECE_SIZE_BYTES) + PIECE_SIZE_BYTES - 1,
+            pieces,
+        };
+        let file_spec = FileSpec {
+            path: file_path,
+            contents: PayloadSlice {
+                starting_piece: 0,
+                piece_offset: 0,
+                length: payload.length,
+            },
+        };
+        Index {
+            root,
+            payload,
+            files: vec![file_spec],
+        }
+    }
+
+    #[test]
+    fn test_identical_files() {
+        let root = PathBuf::from("/root");
+        let file_path = PathBuf::from("file.txt");
+        let piece_digests = vec![[1; 32], [2; 32]];
+
+        let want_index = create_index(root.clone(), file_path.clone(), piece_digests.clone());
+        let have_index = create_index(root, file_path, piece_digests);
+
+        let diff = want_index.diff(&have_index);
+        assert_eq!(diff.want.len(), 0);
+        assert_eq!(diff.have.len(), 2 * PIECE_SIZE_BLOCKS);
+    }
+
+    #[test]
+    fn test_identical_files_partial_block() {
+        let root = PathBuf::from("/root");
+        let file_path = PathBuf::from("file.txt");
+        let piece_digests = vec![[1; 32], [2; 32]];
+
+        let want_index =
+            create_index_partial_block(root.clone(), file_path.clone(), piece_digests.clone());
+        let have_index = create_index_partial_block(root, file_path, piece_digests);
+
+        let diff = want_index.diff(&have_index);
+        assert_eq!(diff.want.len(), 0);
+        assert_eq!(diff.have.len(), 2 * PIECE_SIZE_BLOCKS);
+    }
+
+    #[test]
+    fn test_have_index_empty() {
+        let root = PathBuf::from("/root");
+        let file_path = PathBuf::from("file.txt");
+        let piece_digests = vec![[1; 32], [2; 32]];
+
+        let want_index = create_index(root.clone(), file_path.clone(), piece_digests.clone());
+        let have_index: Index = Index {
+            root,
+            payload: PayloadSpec {
+                digest: [0; 32],
+                length: 0,
+                pieces: vec![],
+            },
+            files: vec![],
+        };
+
+        let diff = want_index.diff(&have_index);
+        assert_eq!(diff.want.len(), 2 * PIECE_SIZE_BLOCKS); // Two pieces worth of blocks should be missing
+        assert_eq!(diff.have.len(), 0)
+    }
+
+    #[test]
+    fn test_have_index_partial_contents() {
+        let root = PathBuf::from("/root");
+        let file_path = PathBuf::from("file.txt");
+        let want_piece_digests = vec![[1; 32], [2; 32], [3; 32]];
+        let have_piece_digests = vec![[1; 32], [2; 32]];
+
+        let want_index = create_index(root.clone(), file_path.clone(), want_piece_digests);
+        let have_index = create_index(root, file_path, have_piece_digests);
+
+        let diff = want_index.diff(&have_index);
+        assert_eq!(diff.want.len(), 1 * PIECE_SIZE_BLOCKS); // One piece worth of blocks should be missing
+        assert_eq!(diff.have.len(), 2 * PIECE_SIZE_BLOCKS);
     }
 }

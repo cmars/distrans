@@ -169,7 +169,14 @@ impl App {
         share_key: &str,
         root: &str,
     ) -> Result<()> {
-        let fetcher = Fetcher::from_dht(peer.clone(), share_key, root).await?;
+        let mut fetcher = Fetcher::from_dht(peer.clone(), share_key, root).await?;
+
+        // Index an existing partial fetch.
+        let indexer = Indexer::from_wanted(fetcher.want_index()).await?;
+        self.add_index_progress_bars(&indexer, &m, cancel.clone());
+
+        // Resume a prior fetch
+        fetcher.set_have_index(indexer.index().await?);
 
         let fetch_progress = m.add(
             ProgressBar::new(0u64)
@@ -254,6 +261,46 @@ impl App {
     ) -> Result<()> {
         let indexer = Indexer::from_file(file.into()).await?;
 
+        self.add_index_progress_bars(&indexer, &m, cancel.clone());
+
+        let seeder = Seeder::new(peer.clone(), indexer.index().await?).await?;
+        let share_key = seeder.share_key();
+        let seed_progress = m.add(
+            ProgressBar::new(0u64)
+                .with_style(self.msg_style.clone())
+                .with_prefix("🌱"),
+        );
+        seed_progress.set_message(format!(
+            "Seeding {} to {}",
+            file.bold().bright_cyan(),
+            share_key.clone().bold().bright_cyan()
+        ));
+        let info_progress = m.add(
+            ProgressBar::new(0u64)
+                .with_style(self.msg_style.clone())
+                .with_prefix("🎁"),
+        );
+        info_progress.set_message(format!(
+            "Anyone may download with {}",
+            format!("distrans fetch {}", share_key)
+                .bold()
+                .bright_magenta()
+        ));
+        seeder.seed(cancel.clone()).await?;
+        seed_progress.finish();
+
+        cancel.cancel();
+        peer.shutdown().await?;
+
+        Ok(())
+    }
+
+    fn add_index_progress_bars(
+        &self,
+        indexer: &Indexer,
+        m: &MultiProgress,
+        cancel: CancellationToken,
+    ) {
         let progress_cancel = cancel.clone();
         let mut index_progress_rx = indexer.subscribe_index_progress();
         let mut digest_progress_rx = indexer.subscribe_digest_progress();
@@ -297,36 +344,5 @@ impl App {
                 }
             }
         });
-
-        let seeder = Seeder::new(peer.clone(), indexer.index().await?).await?;
-        let share_key = seeder.share_key();
-        let seed_progress = m.add(
-            ProgressBar::new(0u64)
-                .with_style(self.msg_style.clone())
-                .with_prefix("🌱"),
-        );
-        seed_progress.set_message(format!(
-            "Seeding {} to {}",
-            file.bold().bright_cyan(),
-            share_key.clone().bold().bright_cyan()
-        ));
-        let info_progress = m.add(
-            ProgressBar::new(0u64)
-                .with_style(self.msg_style.clone())
-                .with_prefix("🎁"),
-        );
-        info_progress.set_message(format!(
-            "Anyone may download with {}",
-            format!("distrans fetch {}", share_key)
-                .bold()
-                .bright_magenta()
-        ));
-        seeder.seed(cancel.clone()).await?;
-        seed_progress.finish();
-
-        cancel.cancel();
-        peer.shutdown().await?;
-
-        Ok(())
     }
 }
