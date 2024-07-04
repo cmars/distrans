@@ -10,7 +10,7 @@ use capnp::{
 use distrans_fileindex::{FileSpec, Index, PayloadPiece, PayloadSlice, PayloadSpec};
 use veilid_core::{FromStr, ValueData};
 
-use self::distrans_capnp::{block_request, header, index};
+use self::distrans_capnp::{block_request, payload_header, index};
 
 const MAX_RECORD_DATA_SIZE: usize = 1_048_576;
 const MAX_INDEX_BYTES: usize = MAX_RECORD_DATA_SIZE - ValueData::MAX_LEN;
@@ -39,7 +39,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn encode_header(idx: &Index, subkeys: u16, route_data: &[u8]) -> Result<Vec<u8>> {
     let mut builder = message::Builder::new_default();
-    let mut header_builder = builder.get_root::<header::Builder>()?;
+    let mut header_builder = builder.get_root::<payload_header::Builder>()?;
     let mut payload_builder = header_builder.reborrow().init_payload();
 
     // Encode the payload
@@ -192,7 +192,7 @@ impl Header {
 
 pub fn decode_header(buf: &[u8]) -> Result<Header> {
     let reader = serialize::read_message(buf, ReaderOptions::new())?;
-    let header_reader = reader.get_root::<header::Reader>()?;
+    let header_reader = reader.get_root::<payload_header::Reader>()?;
     let payload_reader = header_reader.get_payload()?;
 
     let mut payload_digest = [0u8; 32];

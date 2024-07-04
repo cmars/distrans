@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use backoff::backoff::Backoff;
 use flume::{unbounded, Receiver, Sender};
+use roaring::RoaringBitmap;
 use sha2::{Digest, Sha256};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
@@ -33,6 +34,7 @@ pub struct Fetcher<P: Peer> {
     want_index: Index,
     fetch_progress_tx: watch::Sender<Progress>,
     verify_progress_tx: watch::Sender<Progress>,
+    verified_pieces: Arc<RwLock<RoaringBitmap>>,
 }
 
 #[derive(Clone)]
@@ -60,6 +62,7 @@ impl<P: Peer> Clone for Fetcher<P> {
             want_index: self.want_index.clone(),
             fetch_progress_tx: self.fetch_progress_tx.clone(),
             verify_progress_tx: self.verify_progress_tx.clone(),
+            verified_pieces: self.verified_pieces.clone(),
         }
     }
 }
@@ -87,6 +90,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
             want_index,
             fetch_progress_tx,
             verify_progress_tx,
+            verified_pieces: Arc::new(RwLock::new(RoaringBitmap::new())),
         })
     }
 
@@ -119,7 +123,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
         hex::encode(self.want_index.payload().digest())
     }
 
-    pub async fn fetch(mut self, cancel: CancellationToken) -> Result<()> {
+    pub async fn fetch(&mut self, cancel: CancellationToken) -> Result<()> {
         let (fetch_tx, fetch_rx) = unbounded();
         let (verify_tx, verify_rx) = unbounded();
 
@@ -127,13 +131,11 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
         self.enqueue_blocks(fetch_tx.clone(), verify_tx.clone(), done.clone())
             .await?;
         let mut verify_tasks = JoinSet::new();
-        verify_tasks.spawn(Self::verify_blocks(
-            self.want_index.clone(),
+        verify_tasks.spawn(self.clone().verify_blocks(
             cancel.clone(),
             done.clone(),
             fetch_tx.clone(),
             verify_rx.clone(),
-            self.verify_progress_tx.clone(),
         ));
         let mut fetch_tasks = JoinSet::new();
         for i in 0..N_FETCHERS {
@@ -386,13 +388,16 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
         Ok(())
     }
 
-    async fn verify_blocks(
-        index: Index,
+    async fn set_verified_piece(&mut self, piece_index: usize) {
+        let mut verified_pieces = self.verified_pieces.write().await;
+        verified_pieces.insert(piece_index as u32);
+    }
+
+    async fn verify_blocks(mut self,
         cancel: CancellationToken,
         done: CancellationToken,
         fetch_block_tx: Sender<FileBlockFetch>,
         verify_rx: Receiver<PieceState>,
-        verify_progress_tx: watch::Sender<Progress>,
     ) -> Result<()> {
         let mut piece_states: HashMap<(usize, usize), PieceState> = HashMap::new();
         let mut verified_pieces = 0;
@@ -416,13 +421,14 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                     }
                     if to_verify.is_complete() {
                         // verify complete ones
-                        if Self::verify_piece(&index, to_verify.file_index, to_verify.piece_index).await? {
+                        if Self::verify_piece(&self.want_index, to_verify.file_index, to_verify.piece_index).await? {
                             trace!(file_index = to_verify.file_index, piece_index = to_verify.piece_index, "digest verified");
                             verified_pieces += 1;
-                            verify_progress_tx.send_modify(|p| {
+                            self.verify_progress_tx.send_modify(|p| {
                                 p.position += 1;
                             });
-                            if verified_pieces == index.payload().pieces().len() {
+                            self.set_verified_piece(to_verify.piece_index).await;
+                            if verified_pieces == self.want_index.payload().pieces().len() {
                                 info!("all pieces verified");
                                 done.cancel();
                                 return Ok(())
@@ -434,7 +440,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
                                 to_verify.file_index,
                                 to_verify.piece_index,
                                 to_verify.piece_offset,
-                                index.payload().pieces()[to_verify.piece_index].block_count(),
+                                self.want_index.payload().pieces()[to_verify.piece_index].block_count(),
                             ));
                             for block_index in 0..32  {
                                 fetch_block_tx.send_async(FileBlockFetch{
@@ -612,7 +618,7 @@ mod tests {
             .expect("send veilid update");
 
         let tdir = tempfile::TempDir::new().expect("tempdir");
-        let fetcher = Fetcher::from_dht(
+        let mut fetcher = Fetcher::from_dht(
             rp,
             "VLD0:cCHB85pEaV4bvRfywxnd2fRNBScR64UaJC8hoKzyr3M",
             tdir.path().to_str().unwrap(),

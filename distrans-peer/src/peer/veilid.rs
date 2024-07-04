@@ -6,8 +6,7 @@ use tokio::sync::{
 };
 use tracing::{debug, trace};
 use veilid_core::{
-    DHTRecordDescriptor, DHTSchema, KeyPair, OperationId, RoutingContext, Target, ValueData,
-    VeilidAPIError, VeilidUpdate,
+    DHTRecordDescriptor, DHTSchema, DHTSchemaSMPL, KeyPair, OperationId, RoutingContext, Target, ValueData, VeilidAPIError, VeilidUpdate, CRYPTO_KIND_VLD0
 };
 
 use distrans_fileindex::Index;
@@ -39,7 +38,7 @@ impl Veilid {
         })
     }
 
-    async fn open_or_create_dht_record(
+    async fn open_or_create_payload_record(
         &self,
         rc: &RoutingContext,
         header: &Header,
@@ -66,6 +65,19 @@ impl Veilid {
             .await?;
         db.store_json(1, digest_key.as_slice(), &dht_owner).await?;
         Ok(dht_rec)
+    }
+
+    async fn open_or_create_tracker_record(
+        &self,
+        rc: &RoutingContext,
+        header: &Header,
+    ) -> Result<DHTRecordDescriptor> {
+        let ts = rc.api().table_store()?;
+        let db = ts.open("distrans_tracker_dht", 4).await?;
+        let crypto_system = rc.api().crypto()?.get(CRYPTO_KIND_VLD0).unwrap();
+        let o_cnt = 16;
+        let dht_rec = rc.create_dht_record(DHTSchema::SMPL(DHTSchemaSMPL::new(o_cnt, vec![])?), None).await?;
+        todo!();
     }
 
     async fn write_header(
@@ -199,7 +211,7 @@ impl Peer for Veilid {
         let (announce_route, route_data) = rc.api().new_private_route().await?;
         let header = Header::from_index(index, index_bytes.as_slice(), route_data.as_slice());
         trace!(header = format!("{:?}", header));
-        let dht_rec = self.open_or_create_dht_record(&rc, &header).await?;
+        let dht_rec = self.open_or_create_payload_record(&rc, &header).await?;
         let dht_key = dht_rec.key().to_owned();
         self.write_index_bytes(&rc, &dht_key, index_bytes.as_slice())
             .await?;
