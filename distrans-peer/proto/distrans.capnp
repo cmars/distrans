@@ -53,9 +53,11 @@ struct Index {
 struct Header {
   # Describe the payload and how to get it.
 
-  payload @0 :Payload;      # Identify the payload offered.
-  subkeys @1 :UInt16;       # Number of DHT subkeys following this one; concatenate and decode to get the Index.
-  route @2 :Data;           # Private route to request pieces from this peer.
+  payload @0 :Payload;          # Identify the payload offered.
+  subkeys @1 :UInt16;           # Number of DHT subkeys following this one; concatenate and decode to get the Index.
+  route @2 :Data;               # Private route to request pieces from this peer.
+  verifiedKey @3 :Data = 0x"";  # Verified bitset DHT key. If empty, assume all pieces verified (seeder).
+  peersKey @4 :Data = 0x"";     # Tracked peers DHT key. If empty, tracker gossip not available.
 }
 
 ###################################################################
