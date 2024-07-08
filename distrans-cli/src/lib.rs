@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use indicatif::MultiProgress;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 

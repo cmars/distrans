@@ -453,7 +453,16 @@ version = "0.18.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b671a5b39eadb909b0c2b81d22a400d446526e651e64be9eb6674b33644a4"
 dependencies = [
- "embedded-io",
+ "embedded-io 0.5.0",
+]
+
+[[package]]
+name = "capnp"
+version = "0.19.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de71387912cac7dd3cb7c219e09628411620a18061bba58c71453c26ae7bf66a"
+dependencies = [
+ "embedded-io 0.6.1",
 ]
 
 [[package]]
@@ -462,7 +471,16 @@ version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a642faaaa78187e70bdcc0014c593c213553cfeda3b15054426d0d596048b131"
 dependencies = [
- "capnp",
+ "capnp 0.18.13",
+]
+
+[[package]]
+name = "capnpc"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c75ba30e0f08582d53c2f3710cf4bb65ff562614b1ba86906d7391adffe189ec"
+dependencies = [
+ "capnp 0.19.6",
 ]
 
 [[package]]
@@ -964,8 +982,8 @@ name = "distrans_peer"
 version = "0.3.6"
 dependencies = [
  "backoff",
- "capnp",
- "capnpc",
+ "capnp 0.18.13",
+ "capnpc 0.18.1",
  "distrans_fileindex",
  "flume",
  "hex",
@@ -1029,6 +1047,12 @@ name = "embedded-io"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "658bbadc628dc286b9ae02f0cb0f5411c056eb7487b72f0083203f115de94060"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "encode_unicode"
@@ -1618,6 +1642,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indent"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9f1a0777d972970f204fdf8ef319f1f4f8459131636d7e3c96c5d59570d0fa6"
+
+[[package]]
 name = "indenter"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1792,18 +1822,18 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bdcaabe14fa83eaae1fb92480f619c5a8b413580723153da0334848eb2dff24"
+checksum = "c3fe4850c4103a92a7bd14a56ecbe413c27f8c89ea642cb4753b310c30dff812"
 dependencies = [
  "smallvec",
 ]
 
 [[package]]
 name = "keyvaluedb-memorydb"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62802173041ed97845bc20f8cf6817e445fe537ed879ddf43fb96166829ec8ff"
+checksum = "e5e8d196e170cdf21ee4fb0ff779278ca24253c10abee1a49914a893dce71097"
 dependencies = [
  "keyvaluedb",
  "parking_lot",
@@ -1811,9 +1841,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb-sqlite"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "144f474a27a7dadc5c179c08ef9a4662acaca8047f4e5c30d5b77582243c7538"
+checksum = "aa4d3df76ca45b92891e22fbd0a0928d2ef848a65051d5bd2da43ed1c0dfeb6f"
 dependencies = [
  "hex",
  "keyvaluedb",
@@ -1824,9 +1854,9 @@ dependencies = [
 
 [[package]]
 name = "keyvaluedb-web"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d93d243dfa1643389f8b981ddc07b2a7c533f0fae38b3f5831b004b2cc7f6353"
+checksum = "351f750d6c87e6af74cdead18c33bb14fa47882787873bc05faa0002078cb9e5"
 dependencies = [
  "async-lock",
  "flume",
@@ -3752,9 +3782,9 @@ dependencies = [
 
 [[package]]
 name = "veilid-core"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "781b816b008a373914a2f90e3a16501837f4b92ca1d1b32725d2355b6b42b830"
+checksum = "16c799bd8c53e37e4008a094d1c22bc9e7b21a8d3ca87b4fa3b8bffbe2024f51"
 dependencies = [
  "argon2",
  "async-io",
@@ -3762,8 +3792,8 @@ dependencies = [
  "async_executors",
  "backtrace",
  "blake3",
- "capnp",
- "capnpc",
+ "capnp 0.19.6",
+ "capnpc 0.19.0",
  "cfg-if 1.0.0",
  "chacha20",
  "chacha20poly1305",
@@ -3782,6 +3812,7 @@ dependencies = [
  "glob",
  "hex",
  "hickory-resolver",
+ "indent",
  "jni",
  "jni-sys",
  "js-sys",
@@ -3871,9 +3902,9 @@ dependencies = [
 
 [[package]]
 name = "veilid-tools"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6b478b1a1958fc259c54ff896c1d00e6fc3cc75df9c7ffdd1a8d366cd3116c9"
+checksum = "67901cd486f50dfc18b2ee0ca7a8f72094623878a549e71f58c1135262c3a69f"
 dependencies = [
  "android_logger 0.13.3",
  "async-lock",
