@@ -18,7 +18,7 @@ version = "0.3.8"
 # Config for 'cargo dist'
 [workspace.metadata.dist]
 # The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.15.1"
+cargo-dist-version = "0.19.1"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
@@ -39,6 +39,13 @@ unix-archive = ".tar.gz"
 publish-jobs = ["homebrew", "npm"]
 # Whether to install an updater program
 install-updater = false
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+### TODO: remove once cargo-dist 0.20.0 releases
+allow-dirty = ["ci"]
+### TODO: uncomment once cargo-dist 0.20.0 releases
+## Customize Github build setup
+#github-build-setup = "build-setup.yml"
 
 [workspace.metadata.release]
 shared-version = true
@@ -47,9 +54,9 @@ tag-name = "v{{version}}"
 [workspace.dependencies]
 backoff = { version = "0.4.0", features = ["tokio"] }
 sha2 = { version = "0.10.8", features = ["asm"] }
-tokio = { version = "1.37", features = ["full"] }
+tokio = { version = "1.38.1", features = ["full"] }
 tracing = { version = "0.1.40", features = ["log", "attributes"] }
-veilid-core = "0.3.3"
+veilid-core = "0.3.4"
 
 [profile.release]
 strip = true
