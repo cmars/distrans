@@ -1,0 +1,124 @@
+<mxfile host="Electron" modified="2024-07-06T20:50:00.768Z" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.6.4 Chrome/124.0.6367.207 Electron/30.0.6 Safari/537.36" etag="6lZxP7MT8N3SSkFkV18q" version="24.6.4" type="device">
+  <diagram name="Page-1" id="n7TnMaFrF0k3CZJoSL42">
+    <mxGraphModel dx="1050" dy="619" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-17" value="distrans 0.3.6 (current)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;verticalAlign=bottom;" parent="1" vertex="1">
+          <mxGeometry x="40" y="40" width="280" height="530" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-13" value="Index - subkeys 1..Subkeys" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="80" y="360" width="200" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-3" value="Header - subkey 0" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="60" y="200" width="200" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-4" value="Payload { digest, length }" style="text;strokeColor=#9673a6;fillColor=#e1d5e7;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-3" vertex="1">
+          <mxGeometry y="30" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-5" value="Subkeys (following Header)" style="text;strokeColor=#9673a6;fillColor=#e1d5e7;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-3" vertex="1">
+          <mxGeometry y="60" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-6" value="Route (private route data)" style="text;strokeColor=#b85450;fillColor=#f8cecc;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-3" vertex="1">
+          <mxGeometry y="90" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-11" value="Index - subkeys 1..Subkeys" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="70" y="350" width="200" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-7" value="Index - subkeys 1..Subkeys" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="60" y="340" width="200" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-10" value="Serialized index in chunks of ValueData::MAX_LEN" style="text;strokeColor=none;fillColor=default;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-7" vertex="1">
+          <mxGeometry y="30" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-16" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;Main DHT&lt;/h1&gt;&lt;p&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Payload &amp;amp; Index metadata&lt;/li&gt;&lt;li&gt;Private route (mutable)&lt;/li&gt;&lt;li&gt;Serialized Index&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="70" y="50" width="180" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-18" value="distrans 0.4.x (proposed)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;verticalAlign=bottom;" parent="1" vertex="1">
+          <mxGeometry x="720" y="40" width="280" height="530" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-19" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;Verified DHT&lt;/h1&gt;&lt;p&gt;Bitset of pieces in Index, serialized in chunks of ValueData::MAX_LEN&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="760" y="50" width="180" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-20" value="distrans 0.4.x (proposed)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;verticalAlign=bottom;" parent="1" vertex="1">
+          <mxGeometry x="420" y="40" width="280" height="530" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-21" value="Index - subkeys 1..Subkeys" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="460" y="360" width="200" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-22" value="Header - subkey 0" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="440" y="170" width="200" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-23" value="Payload { digest, length }" style="text;strokeColor=#9673a6;fillColor=#e1d5e7;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-22" vertex="1">
+          <mxGeometry y="30" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-24" value="Subkeys (following Header)" style="text;strokeColor=#9673a6;fillColor=#e1d5e7;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-22" vertex="1">
+          <mxGeometry y="60" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-25" value="Route (private route data)" style="text;strokeColor=#b85450;fillColor=#f8cecc;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-22" vertex="1">
+          <mxGeometry y="90" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-31" value="Verified DHT key" style="text;strokeColor=#9673a6;fillColor=#e1d5e7;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-22" vertex="1">
+          <mxGeometry y="120" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-26" value="Index - subkeys 1..Subkeys" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="450" y="350" width="200" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-27" value="Index - subkeys 1..Subkeys" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="440" y="340" width="200" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-28" value="Serialized index in chunks of ValueData::MAX_LEN" style="text;strokeColor=none;fillColor=default;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-27" vertex="1">
+          <mxGeometry y="30" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-29" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;Main DHT&lt;/h1&gt;&lt;p&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Payload &amp;amp; Index metadata&lt;/li&gt;&lt;li&gt;Private route (mutable)&lt;/li&gt;&lt;li&gt;Serialized Index&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="450" y="50" width="180" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-30" value="" style="shape=flexArrow;endArrow=classic;html=1;rounded=0;" parent="1" edge="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="330" y="270" as="sourcePoint" />
+            <mxPoint x="410" y="270" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" parent="1" source="YNiO6JekwG4ZWWlteSPr-31" target="YNiO6JekwG4ZWWlteSPr-18" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-33" value="distrans 0.4.x (proposed)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;verticalAlign=bottom;" parent="1" vertex="1">
+          <mxGeometry x="1020" y="40" width="280" height="530" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-34" value="&lt;h1 style=&quot;margin-top: 0px;&quot;&gt;Tracker DHT&lt;/h1&gt;&lt;p&gt;Directory of peer DHTs participating in the swarm&lt;/p&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="1060" y="50" width="180" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-35" value="Peer 0 - subkey 0" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="1040" y="160" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-36" value="Main DHT" style="text;strokeColor=#6c8ebf;fillColor=#dae8fc;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-35" vertex="1">
+          <mxGeometry y="30" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-37" value="Verified DHT" style="text;strokeColor=#6c8ebf;fillColor=#dae8fc;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-35" vertex="1">
+          <mxGeometry y="60" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-39" value="Peer 1 - subkey 1" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="1040" y="260" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-40" value="Main DHT" style="text;strokeColor=#6c8ebf;fillColor=#dae8fc;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-39" vertex="1">
+          <mxGeometry y="30" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-41" value="Verified DHT" style="text;strokeColor=#6c8ebf;fillColor=#dae8fc;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-39" vertex="1">
+          <mxGeometry y="60" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-42" value="Peer N - subkey N" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="1040" y="410" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-43" value="Main DHT" style="text;strokeColor=#6c8ebf;fillColor=#dae8fc;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-42" vertex="1">
+          <mxGeometry y="30" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-44" value="Verified DHT" style="text;strokeColor=#6c8ebf;fillColor=#dae8fc;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" parent="YNiO6JekwG4ZWWlteSPr-42" vertex="1">
+          <mxGeometry y="60" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="YNiO6JekwG4ZWWlteSPr-45" value="..." style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="1110" y="370" width="60" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
