@@ -17,7 +17,7 @@ jobs:
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@d388a4836fcdbde0e50e395dc79a2670ccdef13f
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a
 
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@86afd21a7b114234aab55ba0005eed52f77d89e4
