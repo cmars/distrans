@@ -1,2 +1,0 @@
-- name: Customize environment variables
-  run: echo "RUSTFLAGS='--cfg tokio_unstable'" >> $GITHUB_ENV
