@@ -192,8 +192,8 @@ mod tests {
 
     use tokio::time::sleep;
     use veilid_core::{
-        FromStr, OperationId, TypedKey, VeilidAppCall, VeilidRouteChange, VeilidStateAttachment,
-        VeilidUpdate,
+        FromStr, OperationId, TimestampDuration, TypedKey, VeilidAppCall, VeilidRouteChange,
+        VeilidStateAttachment, VeilidUpdate,
     };
 
     use crate::{
@@ -257,6 +257,8 @@ mod tests {
                 state: veilid_core::AttachmentState::AttachedGood,
                 public_internet_ready: true,
                 local_network_ready: true,
+                attached_uptime: None,
+                uptime: TimestampDuration::new(0),
             })))
             .expect("send veilid update");
 
