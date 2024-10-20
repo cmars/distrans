@@ -13,7 +13,7 @@ edition = "2021"
 homepage = "https://github.com/cmars/distrans"
 license = "MPL-2.0"
 repository = "https://github.com/cmars/distrans"
-version = "0.3.11"
+version = "0.3.12"
 
 # Config for 'cargo dist'
 [workspace.metadata.dist]
