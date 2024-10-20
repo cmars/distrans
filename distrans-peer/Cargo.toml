@@ -16,7 +16,7 @@ path = "src/lib.rs"
 
 [dependencies]
 backoff = { workspace = true }
-capnp = "0.18"
+capnp = "0.20"
 distrans_fileindex = { version = "0", path = "../distrans-fileindex" }
 flume = "0.11"
 hex = "0.4.3"
