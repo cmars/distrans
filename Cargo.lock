@@ -966,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "distrans_cli"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [
  "backoff",
  "clap",
@@ -985,7 +985,7 @@ dependencies = [
 
 [[package]]
 name = "distrans_fileindex"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [
  "flume",
  "hex-literal",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "distrans_peer"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [
  "backoff",
  "capnp 0.20.2",
