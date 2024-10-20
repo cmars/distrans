@@ -504,12 +504,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "capnpc"
-version = "0.18.1"
+name = "capnp"
+version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a642faaaa78187e70bdcc0014c593c213553cfeda3b15054426d0d596048b131"
+checksum = "c9e0676a27d3cf41fc949b3061cca99c67791a8a3baf1544b30ef712936e7e3b"
 dependencies = [
- "capnp 0.18.13",
+ "embedded-io 0.6.1",
 ]
 
 [[package]]
@@ -519,6 +519,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c75ba30e0f08582d53c2f3710cf4bb65ff562614b1ba86906d7391adffe189ec"
 dependencies = [
  "capnp 0.19.8",
+]
+
+[[package]]
+name = "capnpc"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d13cb6e2643fd1f9fb804ba938323636ef52e07d6e495e372d933ad0cb98207"
+dependencies = [
+ "capnp 0.20.2",
 ]
 
 [[package]]
@@ -988,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "distrans_cli"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "backoff",
  "clap",
@@ -1007,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "distrans_fileindex"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "flume",
  "hex-literal",
@@ -1020,11 +1029,11 @@ dependencies = [
 
 [[package]]
 name = "distrans_peer"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "backoff",
  "capnp 0.18.13",
- "capnpc 0.18.1",
+ "capnpc 0.20.0",
  "distrans_fileindex",
  "flume",
  "hex",
