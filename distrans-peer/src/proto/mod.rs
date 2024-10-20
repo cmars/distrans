@@ -95,8 +95,7 @@ pub fn encode_index(idx: &Index) -> Result<Vec<u8>> {
                 .path()
                 .as_os_str()
                 .to_str()
-                .ok_or(Error::EncodePath(idx_file.path().to_owned()))?
-                .into(),
+                .ok_or(Error::EncodePath(idx_file.path().to_owned()))?,
         );
     }
 
