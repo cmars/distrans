@@ -21,17 +21,17 @@ name = "distrans"
 
 [dependencies]
 backoff = { workspace = true }
-clap = {version = "4.5.4", features = ["derive", "env"]}
-color-eyre = "0.6.3"
-dirs = "5.0.1"
+clap = { version = "4.5", features = ["derive", "env"] }
+color-eyre = "0.6"
+dirs = "5.0"
 distrans_fileindex = { version = "0", path = "../distrans-fileindex" }
 distrans_peer = { version = "0", path = "../distrans-peer" }
-hex = "0.4.3"
-indicatif = { version = "0.17.8", features = ["tokio", "futures"] }
+hex = "0.4"
+indicatif = { version = "0.17", features = ["tokio", "futures"] }
 tokio = { workspace = true }
-tokio-util = "0.7.10"
-tracing = { version = "0.1.40", features = ["log", "attributes"] }
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tokio-util = "0.7"
+tracing = { version = "0.1", features = ["log", "attributes"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [target.'cfg(unix)'.dependencies]
 sha2 = { workspace = true }

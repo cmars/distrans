@@ -562,7 +562,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use distrans_fileindex::Indexer;
-    use veilid_core::{VeilidStateAttachment, VeilidUpdate};
+    use veilid_core::{TimestampDuration, VeilidStateAttachment, VeilidUpdate};
 
     use crate::{
         proto::encode_index,
@@ -608,6 +608,8 @@ mod tests {
                 state: veilid_core::AttachmentState::AttachedGood,
                 public_internet_ready: true,
                 local_network_ready: true,
+                attached_uptime: None,
+                uptime: TimestampDuration::new(0),
             })))
             .expect("send veilid update");
 
