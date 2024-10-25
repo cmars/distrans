@@ -186,13 +186,14 @@ impl<P: Peer> Seeder<P> {
 #[cfg(test)]
 mod tests {
     use std::{
+        str::FromStr,
         sync::{Arc, Mutex},
         time::Duration,
     };
 
     use tokio::time::sleep;
     use veilid_core::{
-        FromStr, OperationId, TimestampDuration, TypedKey, VeilidAppCall, VeilidRouteChange,
+        OperationId, TimestampDuration, TypedKey, VeilidAppCall, VeilidRouteChange,
         VeilidStateAttachment, VeilidUpdate,
     };
 

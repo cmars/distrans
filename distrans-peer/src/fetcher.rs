@@ -1,6 +1,7 @@
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use backoff::backoff::Backoff;
@@ -14,7 +15,7 @@ use tokio::task::JoinSet;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument, trace, warn};
-use veilid_core::{FromStr, Target, TypedKey};
+use veilid_core::{Target, TypedKey};
 
 use distrans_fileindex::{Index, BLOCK_SIZE_BYTES, PIECE_SIZE_BLOCKS, PIECE_SIZE_BYTES};
 

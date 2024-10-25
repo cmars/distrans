@@ -1,14 +1,19 @@
 #[allow(dead_code)]
 mod distrans_capnp;
 
-use std::{array::TryFromSliceError, num::TryFromIntError, path::PathBuf, str::Utf8Error};
+use std::{
+    array::TryFromSliceError,
+    num::TryFromIntError,
+    path::PathBuf,
+    str::{FromStr, Utf8Error},
+};
 
 use capnp::{
     message::{self, ReaderOptions},
     serialize,
 };
 use distrans_fileindex::{FileSpec, Index, PayloadPiece, PayloadSlice, PayloadSpec};
-use veilid_core::{FromStr, ValueData};
+use veilid_core::ValueData;
 
 use self::distrans_capnp::{block_request, header, index};
 
