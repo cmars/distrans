@@ -2,7 +2,7 @@ version: '3'
 
 services:
   prometheus:
-    image: prom/prometheus:v2.52.0
+    image: prom/prometheus:v2.55.1
     ports:
       - 9090:9090
     volumes:
