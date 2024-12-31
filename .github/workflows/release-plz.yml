@@ -18,6 +18,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203
+        with:
+          toolchain: stable
+          components: clippy,rustfmt
 
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@395042a06223c60c3e953d5fa124e97dfef96672
