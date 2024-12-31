@@ -4,7 +4,7 @@
 #
 
 app = 'distrans-seed-demofile'
-primary_region = 'dfw'
+primary_region = 'ord'
 
 [build]
   dockerfile = 'examples/fly.io/Dockerfile'

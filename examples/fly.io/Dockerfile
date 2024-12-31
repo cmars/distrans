@@ -22,7 +22,10 @@ COPY --from=builder /src/examples/fly.io/secure-envelopes.png .
 VOLUME /state
 ENV STATE_DIR=/state
 
-ENV RUST_LOG="veilid_core=debug,distrans=debug"
+ENV RUST_LOG="veilid_core=error,distrans=debug"
 ENV NODE_ADDR=":5150"
+
+EXPOSE 5150/udp
+EXPOSE 5150/tcp
 
 ENTRYPOINT ["/distrans", "seed", "/share/secure-envelopes.png"]
