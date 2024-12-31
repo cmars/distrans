@@ -1,4 +1,0 @@
-### TODO: rename & uncomment once cargo-dist 0.20.0 releases
-### See top-level Cargo.toml [workspace.metadata.dist] for details
-#- name: Customize environment variables
-#  run: echo "RUSTFLAGS='--cfg tokio_unstable'" >> $GITHUB_ENV
