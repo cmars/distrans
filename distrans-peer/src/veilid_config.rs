@@ -9,10 +9,14 @@ pub fn node_addr() -> Option<String> {
     }
 }
 
-pub fn callback(state_dir: String, key: String) -> ConfigCallbackReturn {
+pub fn callback(state_dir: String, ns: Option<String>, key: String) -> ConfigCallbackReturn {
     match key.as_str() {
         "program_name" => Ok(Box::new(String::from("distrans"))),
-        "namespace" => Ok(Box::<String>::default()),
+        "namespace" => Ok(if let Some(name) = ns {
+            Box::new(name)
+        } else {
+            Box::<String>::default()
+        }),
         "capabilities.disable" => Ok(Box::<Vec<FourCC>>::default()),
         "table_store.directory" => Ok(Box::new(get_table_store_path(&state_dir))),
         "table_store.delete" => Ok(Box::new(false)),

@@ -156,7 +156,8 @@ impl App {
     }
 
     async fn new_peer(&self) -> Result<AppPeer> {
-        let (routing_context, update_tx, _) = new_routing_context(&self.cli.state_dir()?).await?;
+        let (routing_context, update_tx, _) =
+            new_routing_context(&self.cli.state_dir()?, None).await?;
         let peer = Observable::new(Veilid::new(routing_context, update_tx).await?);
         Ok(peer)
     }

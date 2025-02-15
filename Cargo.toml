@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["distrans-fileindex", "distrans-peer", "distrans-cli"]
+members = [
+    "distrans-fileindex",
+    "distrans-peer",
+    "distrans-cli",
+    "discovery-test",
+]
 
 [workspace.package]
 authors = ["Casey Marshall <me@cmars.tech>"]
@@ -62,7 +67,8 @@ backoff = { version = "0.4", features = ["tokio"] }
 sha2 = { version = "0.10", features = ["asm"] }
 tokio = { version = "1.40", features = ["full"] }
 tracing = { version = "0.1", features = ["log", "attributes"] }
-veilid-core = "0.4.1"
+veilid-core = { git = "https://gitlab.com/veilid/veilid.git", rev = "203b2ada" }
+# veilid-core = { git = "https://gitlab.com/veilid/veilid.git", branch = "main" }
 
 [profile.release]
 strip = true
