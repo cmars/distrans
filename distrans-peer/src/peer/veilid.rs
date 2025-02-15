@@ -44,7 +44,8 @@ impl Veilid {
         rc: &RoutingContext,
         header: &Header,
     ) -> Result<DHTRecordDescriptor> {
-        let ts = rc.api().table_store()?;
+        let api = rc.api();
+        let ts = api.table_store()?;
         let db = ts.open("distrans_payload_dht", 2).await?;
         let digest_key = header.payload_digest();
         let maybe_dht_key = db.load_json(0, digest_key.as_slice()).await?;
@@ -54,7 +55,9 @@ impl Veilid {
         }
         let o_cnt = header.subkeys() + 1;
         debug!(o_cnt, "header subkeys");
-        let dht_rec = rc.create_dht_record(DHTSchema::dflt(o_cnt)?, None).await?;
+        let dht_rec = rc
+            .create_dht_record(DHTSchema::dflt(o_cnt)?, None, None)
+            .await?;
         let dht_owner = KeyPair::new(
             dht_rec.owner().to_owned(),
             dht_rec
