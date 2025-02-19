@@ -446,7 +446,7 @@ async fn announce(task: &Task, routing_context: &RoutingContext) -> Result<(), E
                 let (dht_rec, owner) = rdv
                     .open_or_create(task.schema.clone(), &task.digest)
                     .await?;
-                let subkey = random::<u32>() % 16;
+                let subkey = random::<u32>() % task.schema.max_subkey();
                 let demo_value =
                     Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
                 routing_context
