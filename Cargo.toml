@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["distrans-fileindex", "distrans-peer", "distrans-cli"]
+members = [
+    "distrans-fileindex",
+    "distrans-peer",
+    "distrans-cli",
+    "discovery-test",
+]
 
 [workspace.package]
 authors = ["Casey Marshall <me@cmars.tech>"]
@@ -11,48 +16,6 @@ license = "MPL-2.0"
 repository = "https://github.com/cmars/distrans"
 version = "0.3.17"
 
-# Config for 'dist'
-[workspace.metadata.dist]
-# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.27.0"
-# CI backends to support
-ci = "github"
-# The installers to generate for each app
-installers = ["shell", "powershell", "npm", "homebrew", "msi"]
-# Target platforms to build apps for (Rust target-triple syntax)
-targets = [
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-    "x86_64-unknown-linux-musl",
-    "x86_64-pc-windows-msvc",
-]
-# Which actions to run on pull requests
-pr-run-mode = "upload"
-# Where to host releases
-hosting = "github"
-# A GitHub repo to push Homebrew formulas to
-tap = "cmars/homebrew-tap"
-# The archive format to use for windows builds (defaults .zip)
-windows-archive = ".tar.gz"
-# The archive format to use for non-windows builds (defaults .tar.xz)
-unix-archive = ".tar.gz"
-# Publish jobs to run in CI
-publish-jobs = ["homebrew", "npm"]
-# Whether to install an updater program
-install-updater = false
-# Path that installers should place binaries in
-install-path = "CARGO_HOME"
-#allow-dirty = ["ci"]
-# Customize Github build setup
-github-build-setup = "build-setup.yml"
-
-[workspace.metadata.dist.github-custom-runners]
-aarch64-apple-darwin = "macos-latest"
-x86_64-apple-darwin = "macos-latest"
-"x86_64-unknown-linux-gnu" = "ubuntu-24.04"
-"x86_64-unknown-linux-musl" = "ubuntu-24.04"
-
 [workspace.metadata.release]
 shared-version = true
 tag-name = "v{{version}}"
@@ -61,8 +24,10 @@ tag-name = "v{{version}}"
 backoff = { version = "0.4", features = ["tokio"] }
 sha2 = { version = "0.10", features = ["asm"] }
 tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7" }
 tracing = { version = "0.1", features = ["log", "attributes"] }
-veilid-core = "0.4.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+veilid-core = { version = "0.4.3" }
 
 [profile.release]
 strip = true

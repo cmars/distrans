@@ -23,8 +23,8 @@ hex = "0.4"
 path-absolutize = "3.1"
 thiserror = "2.0"
 tokio = { workspace = true }
-tokio-util = "0.7"
-tracing = { version = "0.1", features = ["log", "attributes"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
 veilid-core = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

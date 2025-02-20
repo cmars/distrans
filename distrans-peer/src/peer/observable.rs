@@ -19,14 +19,14 @@ pub struct Observable<P: Peer> {
     peer_progress_tx: watch::Sender<Progress>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Progress {
     pub state: State,
     pub length: u64,
     pub position: u64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum State {
     Starting,
     Connecting,
