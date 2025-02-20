@@ -8,8 +8,13 @@ license.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[package.metadata.wix]
+upgrade-guid = "AC324331-633A-4FE0-A583-5DC23213AA63"
+path-guid = "2DFEAD38-9391-4083-9631-FB9510E2581B"
+license = false
+eula = false
+
 [dependencies]
-sha2 = { workspace = true }
 anyhow = { version = "1.0.95", features = ["std", "backtrace"] }
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive", "env"] }
@@ -19,7 +24,13 @@ hex = "0.4"
 rand = "0.9"
 tempfile = "3.10"
 tokio = { workspace = true }
-tokio-util = "0.7"
+tokio-util = { workspace = true }
 veilid-core = { workspace = true }
-tracing = { version = "0.1", features = ["log", "attributes"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+sha2 = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+sha2 = "0.10"

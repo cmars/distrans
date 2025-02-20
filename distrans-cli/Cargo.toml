@@ -29,9 +29,9 @@ distrans_peer = { version = "0", path = "../distrans-peer" }
 hex = "0.4"
 indicatif = { version = "0.17", features = ["tokio", "futures"] }
 tokio = { workspace = true }
-tokio-util = "0.7"
-tracing = { version = "0.1", features = ["log", "attributes"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 sha2 = { workspace = true }
