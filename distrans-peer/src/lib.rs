@@ -5,7 +5,7 @@ mod proto;
 mod seeder;
 pub mod veilid_config;
 
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use veilid_core::{RoutingContext, VeilidUpdate};

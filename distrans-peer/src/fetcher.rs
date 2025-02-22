@@ -151,6 +151,9 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
         let mut verify_progress_rx = self.verify_progress_tx.subscribe();
         loop {
             select! {
+                _ = done.cancelled() => {
+                    break;
+                }
                 verify_status = verify_tasks.join_next() => {
                     if verify_rx.is_empty() {
                         // If we verified all the blocks, forget any prior
@@ -270,7 +273,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
     ) -> Result<()> {
         let mut fh_map: HashMap<usize, File> = HashMap::new();
         loop {
-            tokio::select! {
+            select! {
                 recv_fetch = fetch_block_rx.recv_async() => {
                     let fetch = match recv_fetch {
                         Ok(fetch) => fetch,
@@ -398,7 +401,7 @@ impl<P: Peer + Clone + 'static> Fetcher<P> {
         let mut piece_states: HashMap<(usize, usize), PieceState> = HashMap::new();
         let mut verified_pieces = 0;
         loop {
-            tokio::select! {
+            select! {
                 recv_verify = verify_rx.recv_async() => {
                     // select on verify receiver
                     let mut to_verify = match recv_verify {
