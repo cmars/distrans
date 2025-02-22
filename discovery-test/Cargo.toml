@@ -16,7 +16,7 @@ license = false
 eula = false
 
 [dependencies]
-anyhow = { version = "1.0.95", features = ["std", "backtrace"] }
+anyhow = { workspace = true }
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive", "env"] }
 distrans_peer = { path = "../distrans-peer" }

@@ -127,10 +127,18 @@ impl From<io::Error> for Error {
         Error::LocalFile(err)
     }
 }
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        Error::other(err)
+    }
+}
 
 impl Error {
-    pub fn other<S: ToString>(e: S) -> Error {
-        Error::Fault(Unexpected::Other(e.to_string()))
+    pub fn msg<T: fmt::Display + fmt::Debug + Send + Sync + 'static>(s: T) -> Error {
+        Error::Fault(Unexpected::Other(anyhow::Error::msg(s)))
+    }
+    pub fn other<E: Into<anyhow::Error>>(err: E) -> Error {
+        Error::Fault(Unexpected::Other(err.into()))
     }
     pub fn index(err: distrans_fileindex::Error) -> Error {
         Error::Index { path: None, err }
@@ -252,7 +260,7 @@ pub enum Unexpected {
     IntOverflow(TryFromIntError),
     SliceSize(TryFromSliceError),
     Cancelled,
-    Other(String),
+    Other(anyhow::Error),
 }
 
 impl fmt::Display for Unexpected {

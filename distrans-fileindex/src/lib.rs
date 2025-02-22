@@ -1,6 +1,7 @@
 use std::{
     cmp::min,
     collections::HashMap,
+    io,
     path::{Path, PathBuf},
 };
 
@@ -14,15 +15,23 @@ use tokio::{
     task::JoinSet,
 };
 
-pub use crate::error::{other_err, Error, Result};
+pub use anyhow::{Error, Result};
 
-mod error;
-
+/// Block size in bytes. Blocks are the smallest unit of file transfer in distrans.
 pub const BLOCK_SIZE_BYTES: usize = 32768;
+
+/// Piece size in blocks. A piece is a verified unit of transferred content in distrans.
 pub const PIECE_SIZE_BLOCKS: usize = 32; // 32 * 32KB blocks = 1MB
+
+/// One piece is 32 blocks long, or 1MiB.
 pub const PIECE_SIZE_BYTES: usize = PIECE_SIZE_BLOCKS * BLOCK_SIZE_BYTES;
+
+/// Internal buffer size used when concurrently indexing a file.
 const INDEX_BUFFER_SIZE: usize = 67108864; // 64MB
 
+/// An Index represents a map of filesystem contents in a given layout, with
+/// content digests on each piece of each file, as well as a digest of the
+/// overall content.
 #[derive(Debug, PartialEq, Clone)]
 pub struct Index {
     root: PathBuf,
@@ -31,6 +40,7 @@ pub struct Index {
 }
 
 impl Index {
+    /// Create a new Index for the given root path, content and file layout.
     pub fn new(root: PathBuf, payload: PayloadSpec, files: Vec<FileSpec>) -> Index {
         Index {
             root,
@@ -39,22 +49,27 @@ impl Index {
         }
     }
 
+    /// Get the root path that the index represents.
     pub fn root(&self) -> &Path {
         return self.root.as_ref();
     }
 
+    /// Get the content layout that the index represents.
     pub fn payload(&self) -> &PayloadSpec {
         return &self.payload;
     }
 
+    /// Get the file layout that the index represents.
     pub fn files(&self) -> &Vec<FileSpec> {
         return &self.files;
     }
 
+    /// Create a new empty index with the same root path.
     pub fn empty(&self) -> Index {
         Index::empty_root(&self.root)
     }
 
+    /// Create a new empty index at a given root path.
     pub fn empty_root(root: &Path) -> Index {
         Index {
             root: root.into(),
@@ -67,8 +82,8 @@ impl Index {
         }
     }
 
-    /// diff reconciles an index calculated over actual filesystem state with
-    /// desired filesystem state, returning the file blocks that are missing or
+    /// Reconcile an index calculated over actual filesystem state with desired
+    /// filesystem state, returning the file blocks that are missing or
     /// incomplete.
     pub fn diff(&self, have: &Index) -> IndexDiff {
         let mut want_file_blocks = vec![];
@@ -170,11 +185,13 @@ impl Index {
     }
 }
 
+/// Represent the difference between two indexes.
 pub struct IndexDiff {
     pub want: Vec<FileBlockRef>,
     pub have: Vec<FileBlockRef>,
 }
 
+/// Reference a block in a piece in a file.
 pub struct FileBlockRef {
     pub file_index: usize,
     pub piece_index: usize,
@@ -183,6 +200,7 @@ pub struct FileBlockRef {
     pub block_length: usize,
 }
 
+/// Progress of an indexing process.
 #[derive(Clone)]
 pub struct Progress {
     pub length: u64,
@@ -198,6 +216,7 @@ impl Default for Progress {
     }
 }
 
+/// Indexer represents a process which indexes filesystem contents.
 pub struct Indexer {
     root_dir: PathBuf,
     files: Vec<PathBuf>,
@@ -220,23 +239,19 @@ impl Default for Indexer {
 }
 
 impl Indexer {
-    /// from_file is used to index a complete local file on disk.
+    /// Index a complete local file on disk.
     pub async fn from_file(file: PathBuf) -> Result<Indexer> {
         match file.try_exists() {
             Ok(true) => {}
-            Ok(false) => {
-                return Err(error::Error::IO(std::io::Error::from(
-                    std::io::ErrorKind::NotFound,
-                )))
-            }
-            Err(e) => return Err(Error::IO(e)),
+            Ok(false) => return Err(io::Error::from(io::ErrorKind::NotFound).into()),
+            Err(e) => return Err(e.into()),
         }
 
         // root is directory containing file
         let resolved_file = file.canonicalize()?;
         let root_dir = &resolved_file
             .parent()
-            .ok_or(other_err("cannot resolve parent directory"))?;
+            .ok_or(io::Error::from(io::ErrorKind::NotFound))?;
 
         let (digest_progress_tx, _) = watch::channel(Progress::default());
         let (index_progress_tx, _) = watch::channel(Progress::default());
@@ -249,6 +264,9 @@ impl Indexer {
         })
     }
 
+    /// Index a wanted local file on disk.
+    ///
+    /// The wanted file may be incomplete, corrupt, or may not exist yet.
     pub async fn from_wanted(want: &Index) -> Result<Indexer> {
         if want.files.is_empty() {
             return Ok(Indexer::default());
@@ -279,14 +297,18 @@ impl Indexer {
         }
     }
 
+    /// Subscribe to progress updates on calculating digests of pieces and the
+    /// overall content.
     pub fn subscribe_digest_progress(&self) -> watch::Receiver<Progress> {
         self.digest_progress_tx.subscribe()
     }
 
+    /// Subscribe to progress updates on indexing the filesystem content.
     pub fn subscribe_index_progress(&self) -> watch::Receiver<Progress> {
         self.index_progress_tx.subscribe()
     }
 
+    /// Index the configured content.
     pub async fn index(&self) -> Result<Index> {
         if self.files.is_empty() {
             self.index_progress_tx.send_modify(|p| {
@@ -311,10 +333,7 @@ impl Indexer {
             root: self.root_dir.to_owned().into(),
             payload,
             files: vec![FileSpec {
-                path: resolved_file
-                    .strip_prefix(&self.root_dir)
-                    .map_err(other_err)?
-                    .to_owned(),
+                path: resolved_file.strip_prefix(&self.root_dir)?.to_owned(),
                 contents: PayloadSlice {
                     starting_piece: 0,
                     piece_offset: 0,
@@ -324,6 +343,7 @@ impl Indexer {
         })
     }
 
+    /// Calculate the payload layout for a file's contents.
     async fn index_spec(&self, file: impl AsRef<Path>) -> Result<PayloadSpec> {
         let mut fh = File::open(file.as_ref()).await?;
         let file_meta = fh.metadata().await?;
@@ -345,12 +365,9 @@ impl Indexer {
                 offset: scan_index * INDEX_BUFFER_SIZE,
                 fh: File::open(file.as_ref()).await?,
             };
-            task_tx
-                .send_async(Some(scan_task))
-                .await
-                .map_err(other_err)?;
+            task_tx.send_async(Some(scan_task)).await?;
         }
-        task_tx.send_async(None).await.map_err(other_err)?;
+        task_tx.send_async(None).await?;
 
         for _ in 0..num_cpus::get() {
             scanners.spawn(Self::scan(
@@ -391,7 +408,7 @@ impl Indexer {
         loop {
             select! {
                 recv_result = result_rx.recv_async() => {
-                    let scan_result = recv_result.map_err(other_err)?;
+                    let scan_result = recv_result?;
                     self.index_progress_tx.send_modify(|p| {
                         p.length = file_meta.len() as u64;
                         p.position += scan_result.piece.length as u64;
@@ -405,8 +422,8 @@ impl Indexer {
                                 break;
                             }
                         }
-                        Some(Err(e)) => return Err(other_err(e)),
-                        Some(Ok(Err(e))) => return Err(other_err(e)),
+                        Some(Err(e)) => return Err(e.into()),
+                        Some(Ok(Err(e))) => return Err(e.into()),
                         _ => continue,
                     }
                 }
@@ -425,11 +442,12 @@ impl Indexer {
             payload.length += payload.pieces[payload.pieces.len() - 1].length;
         }
 
-        let payload_digest = digest_task.await.map_err(other_err)??;
+        let payload_digest = digest_task.await??;
         payload.digest = payload_digest;
         Ok(payload)
     }
 
+    /// Process filesystem scanning tasks from a channel.
     async fn scan(
         task_tx: Sender<Option<ScanTask>>,
         task_rx: Receiver<Option<ScanTask>>,
@@ -438,16 +456,14 @@ impl Indexer {
         loop {
             match task_rx.recv_async().await {
                 Ok(None) => {
-                    // Create a tombstones on channels to wake the next receiver.
-                    task_tx.send_async(None).await.map_err(other_err)?;
+                    // Create tombstones on channels to wake the next receiver.
+                    task_tx.send_async(None).await?;
                     return Ok(());
                 }
                 Ok(Some(mut scan_task)) => {
                     scan_task
                         .fh
-                        .seek(std::io::SeekFrom::Start(
-                            scan_task.offset.try_into().map_err(other_err)?,
-                        ))
+                        .seek(std::io::SeekFrom::Start(scan_task.offset.try_into()?))
                         .await?;
                     let mut total_rd = 0;
                     let mut buf = vec![0u8; INDEX_BUFFER_SIZE];
@@ -477,16 +493,17 @@ impl Indexer {
                         };
                         piece.digest = piece_digest.finalize().into();
                         let scan_result = ScanResult { piece_index, piece };
-                        result_tx.send_async(scan_result).await.map_err(other_err)?;
+                        result_tx.send_async(scan_result).await?;
                         offset += PIECE_SIZE_BYTES;
                     }
                 }
-                Err(e) => return Err(other_err(e)),
+                Err(e) => return Err(e.into()),
             };
         }
     }
 }
 
+/// Map file paths in the indexed content onto the payload layout.
 #[derive(Debug, PartialEq, Clone)]
 pub struct FileSpec {
     /// File name.
@@ -554,6 +571,7 @@ impl Clone for PayloadSlice {
     }
 }
 
+/// Repreent the layout of the indexed content payload.
 #[derive(Debug, PartialEq, Clone)]
 pub struct PayloadSpec {
     /// SHA256 digest of the complete payload.
@@ -610,6 +628,7 @@ impl Default for PayloadSpec {
     }
 }
 
+/// A piece of the content payload which is verifiable with a content digest.
 #[derive(Debug, PartialEq, Clone)]
 pub struct PayloadPiece {
     /// SHA256 digest of the complete piece.
