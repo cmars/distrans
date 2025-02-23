@@ -1,7 +1,7 @@
 #![recursion_limit = "256"]
 
+use anyhow::Result;
 use clap::Parser;
-use color_eyre::eyre::Result;
 
 use distrans_cli::{App, Cli};
 

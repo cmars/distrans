@@ -1,7 +1,7 @@
 use std::io::IsTerminal;
 
+use anyhow::{Error, Result};
 use clap::{arg, Parser, Subcommand};
-use color_eyre::eyre::{Error, Result};
 use sha2::{Digest, Sha256};
 use tracing::debug;
 

@@ -62,7 +62,7 @@ impl Veilid {
             dht_rec.owner().to_owned(),
             dht_rec
                 .owner_secret()
-                .ok_or(Error::other("expected dht owner secret"))?
+                .ok_or(Error::msg("expected dht owner secret"))?
                 .to_owned(),
         );
         db.store_json(0, digest_key.as_slice(), dht_rec.key())

@@ -2,7 +2,7 @@ name: Test
 
 on:
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -11,8 +11,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose --workspace
-    - name: Run tests
-      run: cargo test --verbose --workspace
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --verbose --workspace
+      - name: Run unit tests
+        run: cargo test --verbose --workspace
+      - name: Run integration tests
+        run: ./scripts/e2e_seed_fetch.sh

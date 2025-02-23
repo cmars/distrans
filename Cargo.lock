@@ -1055,6 +1055,7 @@ dependencies = [
 name = "distrans_cli"
 version = "0.3.19"
 dependencies = [
+ "anyhow",
  "backoff",
  "clap",
  "color-eyre",
@@ -1074,6 +1075,7 @@ dependencies = [
 name = "distrans_fileindex"
 version = "0.3.19"
 dependencies = [
+ "anyhow",
  "flume",
  "hex-literal",
  "num_cpus",
@@ -1087,6 +1089,7 @@ dependencies = [
 name = "distrans_peer"
 version = "0.3.19"
 dependencies = [
+ "anyhow",
  "backoff",
  "capnp 0.20.3",
  "capnpc 0.20.1",

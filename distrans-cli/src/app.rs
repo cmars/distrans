@@ -1,7 +1,8 @@
 use std::{path::PathBuf, time::Duration};
 
+use anyhow::{Error, Result};
 use backoff::{backoff::Backoff, ExponentialBackoff};
-use color_eyre::{eyre::Error, owo_colors::OwoColorize, Result};
+use color_eyre::owo_colors::OwoColorize;
 use distrans_fileindex::Indexer;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use tokio::{select, spawn, time::sleep};
@@ -115,9 +116,7 @@ impl App {
                     Some(delay) => sleep(delay).await,
                     None => {
                         cancel.cancel();
-                        return Err(
-                            distrans_peer::Error::other("peer reset retries exceeded").into()
-                        );
+                        return Err(Error::msg("peer reset retries exceeded"));
                     }
                 }
             } else {
@@ -148,7 +147,7 @@ impl App {
             Commands::Seed { ref file } => self.do_seed(m, peer, cancel, file).await,
             _ => {
                 cancel.cancel();
-                Err(distrans_peer::Error::other("invalid command").into())
+                Err(Error::msg("invalid command"))
             }
         };
         let _ = canceller.await?;
