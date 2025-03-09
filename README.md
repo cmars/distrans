@@ -1,40 +1,37 @@
-# distrans
+# stigmerge
 
-[![crates.io/crates/distrans_cli](https://img.shields.io/crates/v/distrans_cli.svg)](https://crates.io/crates/distrans_cli)
-[![docs.rs/distrans-fileindex](https://img.shields.io/docsrs/distrans_fileindex)](https://docs.rs/distrans-fileindex)
-[![docs.rs/distrans-peer](https://img.shields.io/docsrs/distrans_peer)](https://docs.rs/distrans-peer)
-[![MPL-2.0](https://img.shields.io/crates/l/distrans.svg)](./LICENSE)
+[![crates.io/crates/stigmerge](https://img.shields.io/crates/v/stigmerge.svg)](https://crates.io/crates/stigmerge)
+[![docs.rs/stigmerge-fileindex](https://img.shields.io/docsrs/stigmerge_fileindex)](https://docs.rs/stigmerge-fileindex)
+[![docs.rs/stigmerge-peer](https://img.shields.io/docsrs/stigmerge_peer)](https://docs.rs/stigmerge-peer)
+[![MPL-2.0](https://img.shields.io/crates/l/stigmerge.svg)](./LICENSE)
 
-"The bytes must flow."
-
-Distrans (distribution and transfer) sends and receives file content anonymously over the [Veilid](https://veilid.com) network.
+stigmerge (distribution and transfer) sends and receives file content anonymously over the [Veilid](https://veilid.com) network.
 
 # Usage
 
-
-`distrans seed <file>` indexes and seeds a file, displaying the dht key which can be used to fetch it.
+`stigmerge seed <file>` indexes and seeds a file, displaying the dht key which can be used to fetch it.
 
 [![asciicast](https://asciinema.org/a/663366.svg)](https://asciinema.org/a/663366)
 
-`distrans fetch <dht key> [directory]` fetches a file while it's being seeded (defaults to current directory).
+`stigmerge fetch <dht key> [directory]` fetches a file while it's being seeded (defaults to current directory).
 
 [![asciicast](https://asciinema.org/a/663367.svg)](https://asciinema.org/a/663367)
 
-Similar to bittorrent, distrans cannot fetch a file unless it's being seeded by a peer.
+Similar to bittorrent, stigmerge cannot fetch a file unless it's being seeded by a peer.
 
-See `distrans --help` for more options.
+See `stigmerge --help` for more options.
 
 ## Try it!
 
-Try fetching a test file with `distrans fetch VLD0:yb7Mz4g-BaFzn2qDt-xCPzsbzlJz7iq1MOFFBaCXqTw`.
+Try fetching a test file with `stigmerge fetch VLD0:yb7Mz4g-BaFzn2qDt-xCPzsbzlJz7iq1MOFFBaCXqTw`.
 
 # Install
 
-Install a [binary release](https://github.com/cmars/distrans/releases) on Linux, macOS or Windows.
+Install a [binary release](https://github.com/cmars/stigmerge/releases) on Linux, macOS or Windows.
 
 ## Rust crate
 
-Install the crate with `cargo install distrans`.
+Build and install from crates.io with `cargo install stigmerge`.
 
 Crate dependencies may require system packages to be installed depending on the target platform.
 
@@ -44,13 +41,13 @@ Others may be similar.
 
 ## Nix flake
 
-Run distrans on Nix with `nix run github:cmars/distrans`.
+Run stigmerge on Nix with `nix run github:cmars/stigmerge`.
 
-Add this flake (`github:cmars/distrans`) as an input to your home manager flake.
+Add this flake (`github:cmars/stigmerge`) as an input to your home manager flake.
 
 Or add the default package to a legacy `home.nix` with something like:
 
-    (builtins.getFlake "github:cmars/distrans").packages.x86_64-linux.default
+    (builtins.getFlake "github:cmars/stigmerge").packages.x86_64-linux.default
 
 # Plans
 
@@ -58,31 +55,31 @@ What's on the roadmap for a 1.0 release.
 
 ## Trackers
 
-Trackers will enable a swarm of distrans peers to operate more like bittorrent, where blocks may be simultaneously seeded and fetched.
+Trackers will enable a swarm of stigmerge peers to operate more like bittorrent, where blocks may be simultaneously seeded and fetched.
 
 ## Multi-file shares
 
-The distrans wire protocol and indexing structures support multi-file shares, but this hasn't been fully implemented yet.
+The stigmerge wire protocol and indexing structures support multi-file shares, but this hasn't been fully implemented yet.
 
 # Troubleshooting
 
 ## Clock skew
 
-Distrans operates an embedded Veilid node, which requires a synchronized local clock. Clock skew can prevent distrans from connecting to the Veilid network.
+stigmerge operates an embedded Veilid node, which requires a synchronized local clock. Clock skew can prevent stigmerge from connecting to the Veilid network.
 
 ## Debug logging
 
 Logging can be configured with the [RUST_LOG environment variable](https://docs.rs/env_logger/latest/env_logger/#enabling-logging).
 
-`RUST_LOG=debug` will enable all debug-level logging in distrans as well as veilid-core, which may be useful for troubleshooting low-level Veilid network problems and reporting issues.
+`RUST_LOG=debug` will enable all debug-level logging in stigmerge as well as veilid-core, which may be useful for troubleshooting low-level Veilid network problems and reporting issues.
 
 ## Issues
 
-When opening an issue, note the OS type, OS release version, distrans version, and steps to reproduce. Any logs you can attach may help.
+When opening an issue, note the OS type, OS release version, stigmerge version, and steps to reproduce. Any logs you can attach may help.
 
 # Development
 
-In a Nix environment, `nix develop github:cmars/distrans` (or `nix develop` in this directory) to get a devshell with the necessary tool dependencies.
+In a Nix environment, `nix develop github:cmars/stigmerge` (or `nix develop` in this directory) to get a devshell with the necessary tool dependencies.
 
 On other platforms a [Veilid development environment](https://gitlab.com/veilid/veilid/-/blob/2ec00e18da999dd16b8c84444bb1e60f9503e752/DEVELOPMENT.md) will suffice.
 
@@ -94,7 +91,6 @@ Github is used for CICD and especially [release automation](https://blog.orhun.d
 
 ## Contributions
 
-Branches and releases are regularly mirrored to [Gitlab](https://gitlab.com/cmars232/distrans). Pull requests might be accepted from either, if they fit with the project plans and goals.
+Branches and releases are regularly mirrored to [Gitlab](https://gitlab.com/cmars232/stigmerge). Pull requests might be accepted from either, if they fit with the project plans and goals.
 
 Open an issue and ask before picking up a branch and proposing, for best results.
-

@@ -1,5 +1,5 @@
 {
-  description = "distrans";
+  description = "stigmerge";
 
   inputs = {
     # NixOS 24.11 has recent enough versions of capnproto and protobuf to
@@ -49,7 +49,7 @@
         };
 
         packages.default = craneLib.buildPackage {
-          pname = "distrans";
+          pname = "stigmerge";
           src = ./.;
 
           buildInputs = with pkgs; [

@@ -27,10 +27,10 @@ publish_allow_dirty = false
 semver_check = false
 
 [[package]]
-name = "distrans_fileindex"
+name = "stigmerge_fileindex"
 
 [[package]]
-name = "distrans_peer"
+name = "stigmerge_peer"
 
 [[package]]
-name = "distrans_cli"
+name = "stigmerge"

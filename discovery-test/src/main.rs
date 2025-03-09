@@ -3,9 +3,9 @@ use std::time::Duration;
 use anyhow::Error;
 use chrono::Utc;
 use clap::{command, Parser};
-use distrans_peer::{new_routing_context, NodeState};
 use rand::{random, rngs::OsRng, TryRngCore};
 use sha2::{Digest, Sha256};
+use stigmerge_peer::{new_routing_context, NodeState};
 use tokio::{
     select, signal,
     sync::broadcast::{self, Receiver},
