@@ -4,7 +4,7 @@
 /tools/
 /.github/
 /.vscode/
-/distrans-peer/stress-obs/
+/stigmerge-peer/stress-obs/
 /flake.*
 /CHANGELOG.md
 /release-plz.toml

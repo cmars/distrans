@@ -9,13 +9,13 @@ fetch_dir=$(mktemp -d)
 trap "rm -rf ${seed_dir} ${fetch_dir}" EXIT
 
 cargo build
-distrans=$(pwd)/target/debug/distrans
+stigmerge=$(pwd)/target/debug/stigmerge
 head -c 2097153 /dev/urandom > ${seed_dir}/testfile
 digest=$(sha256sum ${seed_dir}/testfile | cut -d' ' -f1)
 
 function run_seed {
     cd ${seed_dir}
-    ${distrans} --no-ui seed testfile 2>&1 > seed.log
+    ${stigmerge} --no-ui seed testfile 2>&1 > seed.log
 }
 
 function get_seed_key {
@@ -42,7 +42,7 @@ else
     echo "got seed key ${seed_key}"
 fi
 
-(cd ${fetch_dir}; ${distrans} --no-ui fetch ${seed_key})
+(cd ${fetch_dir}; ${stigmerge} --no-ui fetch ${seed_key})
 fetch_digest=$(sha256sum ${fetch_dir}/testfile | cut -d' ' -f1)
 
 [ "${digest}" = "${fetch_digest}" ]

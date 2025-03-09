@@ -1,19 +1,19 @@
 [workspace]
 resolver = "2"
 members = [
-    "distrans-fileindex",
-    "distrans-peer",
-    "distrans-cli",
+    "stigmerge-fileindex",
+    "stigmerge-peer",
+    "stigmerge",
     "discovery-test",
 ]
 
 [workspace.package]
 authors = ["Casey Marshall <me@cmars.tech>"]
-documentation = "https://github.com/cmars/distrans"
+documentation = "https://github.com/cmars/stigmerge"
 edition = "2021"
-homepage = "https://github.com/cmars/distrans"
+homepage = "https://github.com/cmars/stigmerge"
 license = "MPL-2.0"
-repository = "https://github.com/cmars/distrans"
+repository = "https://github.com/cmars/stigmerge"
 version = "0.3.19"
 
 [workspace.metadata.release]
