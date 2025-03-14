@@ -49,6 +49,21 @@ Or add the default package to a legacy `home.nix` with something like:
 
     (builtins.getFlake "github:cmars/stigmerge").packages.x86_64-linux.default
 
+## Android (termux binary)
+
+Stigmerge can be compiled from source and run on the command-line with [Termux](https://termux.dev) on Android.
+
+You'll need to install Rust and Cargo to build it, and the following runtime dependencies:
+
+```bash
+pkg install which
+pkg install openjdk-21
+```
+
+Other JDKs might work as well, YMMV. Comments in
+[stigmerge/src/bin/stigmerge.rs](./stigmerge/src/bin/stigmerge.rs) explain why
+this is currently necessary.
+
 # Plans
 
 What's on the roadmap for a 1.0 release.
