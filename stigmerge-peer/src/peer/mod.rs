@@ -12,7 +12,7 @@ use stigmerge_fileindex::Index;
 
 use crate::{proto::Header, Result};
 
-pub type ShareKey = CryptoTyped<CryptoKey>;
+pub type TypedKey = CryptoTyped<CryptoKey>;
 
 pub trait Peer: Clone + Send {
     fn subscribe_veilid_update(&self) -> Receiver<VeilidUpdate>;
@@ -23,10 +23,10 @@ pub trait Peer: Clone + Send {
     fn announce(
         &mut self,
         index: &Index,
-    ) -> impl std::future::Future<Output = Result<(ShareKey, Target, Header)>> + Send;
+    ) -> impl std::future::Future<Output = Result<(TypedKey, Target, Header)>> + Send;
     fn reannounce_route(
         &mut self,
-        key: &ShareKey,
+        key: &TypedKey,
         prior_route: Option<Target>,
         index: &Index,
         header: &Header,
@@ -34,12 +34,12 @@ pub trait Peer: Clone + Send {
 
     fn resolve(
         &mut self,
-        key: &ShareKey,
+        key: &TypedKey,
         root: &Path,
     ) -> impl std::future::Future<Output = Result<(Target, Header, Index)>> + Send;
     fn reresolve_route(
         &mut self,
-        key: &ShareKey,
+        key: &TypedKey,
         prior_route: Option<Target>,
     ) -> impl Future<Output = Result<(Target, Header)>> + Send;
 
