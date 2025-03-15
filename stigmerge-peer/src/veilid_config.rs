@@ -23,7 +23,9 @@ pub fn callback(state_dir: String, ns: Option<String>, key: String) -> ConfigCal
         "block_store.directory" => Ok(Box::new(get_block_store_path(&state_dir))),
         "block_store.delete" => Ok(Box::new(false)),
         "protected_store.allow_insecure_fallback" => Ok(Box::new(true)),
-        "protected_store.always_use_insecure_storage" => Ok(Box::new(false)),
+        "protected_store.always_use_insecure_storage" => {
+            Ok(Box::new(always_use_insecure_storage()))
+        }
         "protected_store.directory" => Ok(Box::new(get_protected_store_path(&state_dir))),
         "protected_store.delete" => Ok(Box::new(false)),
         "protected_store.device_encryption_key_password" => Ok(Box::new("".to_owned())),
@@ -118,6 +120,16 @@ pub fn callback(state_dir: String, ns: Option<String>, key: String) -> ConfigCal
             Err(VeilidAPIError::internal(err))
         }
     }
+}
+
+#[cfg(not(target_os = "android"))]
+fn always_use_insecure_storage() -> bool {
+    false
+}
+
+#[cfg(target_os = "android")]
+fn always_use_insecure_storage() -> bool {
+    true
 }
 
 fn get_block_store_path(state_dir: &String) -> String {
