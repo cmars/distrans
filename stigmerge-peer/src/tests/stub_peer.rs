@@ -7,7 +7,7 @@ use stigmerge_fileindex::Index;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use veilid_core::{OperationId, Target, VeilidUpdate};
 
-use crate::{error::Result, peer::ShareKey};
+use crate::{error::Result, peer::TypedKey};
 use crate::{proto::Header, Peer};
 
 pub struct StubPeer {
@@ -15,7 +15,7 @@ pub struct StubPeer {
     pub reset_result: Arc<Mutex<dyn Fn() -> Result<()> + Send + 'static>>,
     pub shutdown_result: Arc<Mutex<dyn Fn() -> Result<()> + Send + 'static>>,
     pub announce_result:
-        Arc<Mutex<dyn Fn() -> Result<(ShareKey, Target, Header)> + Send + 'static>>,
+        Arc<Mutex<dyn Fn() -> Result<(TypedKey, Target, Header)> + Send + 'static>>,
     pub reannounce_route_result: Arc<Mutex<dyn Fn() -> Result<(Target, Header)> + Send + 'static>>,
     pub resolve_result: Arc<Mutex<dyn Fn() -> Result<(Target, Header, Index)> + Send + 'static>>,
     pub reresolve_route_result: Arc<Mutex<dyn Fn() -> Result<(Target, Header)> + Send + 'static>>,
@@ -61,13 +61,13 @@ impl Peer for StubPeer {
         (*(self.shutdown_result.lock().unwrap()))()
     }
 
-    async fn announce(&mut self, _index: &Index) -> Result<(ShareKey, Target, Header)> {
+    async fn announce(&mut self, _index: &Index) -> Result<(TypedKey, Target, Header)> {
         (*(self.announce_result.lock().unwrap()))()
     }
 
     async fn reannounce_route(
         &mut self,
-        _key: &ShareKey,
+        _key: &TypedKey,
         _prior_route: Option<Target>,
         _index: &Index,
         _header: &Header,
@@ -75,13 +75,13 @@ impl Peer for StubPeer {
         (*(self.reannounce_route_result.lock().unwrap()))()
     }
 
-    async fn resolve(&mut self, _key: &ShareKey, _root: &Path) -> Result<(Target, Header, Index)> {
+    async fn resolve(&mut self, _key: &TypedKey, _root: &Path) -> Result<(Target, Header, Index)> {
         (*(self.resolve_result.lock().unwrap()))()
     }
 
     async fn reresolve_route(
         &mut self,
-        _key: &ShareKey,
+        _key: &TypedKey,
         _prior_route: Option<Target>,
     ) -> Result<(Target, Header)> {
         (*(self.reresolve_route_result.lock().unwrap()))()

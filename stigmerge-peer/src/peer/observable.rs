@@ -11,7 +11,7 @@ use veilid_core::{OperationId, Target, VeilidUpdate};
 
 use crate::{error::Error, error::NodeState, error::Result, proto::Header, Peer};
 
-use super::ShareKey;
+use super::TypedKey;
 
 pub struct Observable<P: Peer> {
     peer: P,
@@ -137,14 +137,14 @@ impl<P: Peer + 'static> Peer for Observable<P> {
     }
 
     #[instrument(skip(self, index), level = "debug", err)]
-    async fn announce(&mut self, index: &Index) -> Result<(ShareKey, Target, Header)> {
+    async fn announce(&mut self, index: &Index) -> Result<(TypedKey, Target, Header)> {
         self.peer.announce(index).await
     }
 
     #[instrument(skip(self, index, header), level = "debug", err)]
     async fn reannounce_route(
         &mut self,
-        key: &ShareKey,
+        key: &TypedKey,
         prior_route: Option<Target>,
         index: &Index,
         header: &Header,
@@ -155,14 +155,14 @@ impl<P: Peer + 'static> Peer for Observable<P> {
     }
 
     #[instrument(skip(self), level = "debug", err)]
-    async fn resolve(&mut self, key: &ShareKey, root: &Path) -> Result<(Target, Header, Index)> {
+    async fn resolve(&mut self, key: &TypedKey, root: &Path) -> Result<(Target, Header, Index)> {
         self.peer.resolve(key, root).await
     }
 
     #[instrument(skip(self), level = "debug", err)]
     async fn reresolve_route(
         &mut self,
-        key: &ShareKey,
+        key: &TypedKey,
         prior_route: Option<Target>,
     ) -> Result<(Target, Header)> {
         self.peer.reresolve_route(key, prior_route).await
